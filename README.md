@@ -36,7 +36,7 @@
 
 ## Getting started
 
-1. Download **Puffco Monitor.exe** from the [Releases](../../releases) page and put it in its own folder. It saves its data next to itself.
+1. Download **PuffcoMonitor.exe** from the [Releases](../../releases/latest) page and put it in its own folder. It saves its data next to itself.
 2. Run it. Windows SmartScreen may warn about an unsigned app: click **More info**, then **Run anyway**.
 3. **Close the Puffco phone app** (or turn off your phone's Bluetooth). The rig only accepts one connection at a time.
 4. Click **Scan** and pick your rig, then **Connect**.
