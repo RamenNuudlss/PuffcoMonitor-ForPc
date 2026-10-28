@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puffco Monitor</title>
+<link rel="icon" href="/icon.png">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0f;
+  --bg2: #101016;
+  --panel: rgba(255,255,255,.035);
+  --panel-hi: rgba(255,255,255,.06);
+  --line: rgba(255,255,255,.075);
+  --line-hi: rgba(255,255,255,.14);
+  --text: #eeeef3;
+  --dim: #8d8d9a;
+  --faint: #5c5c68;
+  --accent: #ff8a9a;
+  --accent-rgb: 255,138,154;
+  --good: #5ee59a; --warn: #f6b84b; --bad: #ff6470; --hot: #ff8a3c; --cool: #6fb3ff;
+  --r: 16px;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-d: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text); font: 14px/1.45 var(--font);
+  display: grid; grid-template-columns: 252px 1fr; overflow: hidden;
+  -webkit-font-smoothing: antialiased; user-select: none;
+}
+body::before {                                   /* soft ambient light in the accent colour */
+  content: ""; position: fixed; inset: -20% -10% auto auto; width: 70vw; height: 70vh; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb), .10), transparent 70%); z-index: 0;
+  transition: background .8s;
+}
+body::after {
+  content: ""; position: fixed; left: 200px; bottom: -30vh; width: 60vw; height: 60vh; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(110,120,255,.06), transparent 70%); z-index: 0;
+}
+button, input, select { font: inherit; color: inherit; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,.16); }
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ------------------------------------------------------------- sidebar --- */
+.side {
+  position: relative; z-index: 2; display: flex; flex-direction: column; gap: 18px; padding: 20px 16px 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+  border-right: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px; }
+.brand img { width: 40px; height: 40px; border-radius: 11px; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.brand b { display: block; font: 600 15px/1.2 var(--font-d); letter-spacing: .01em; }
+.brand span { color: var(--faint); font-size: 12px; }
+.devchip {
+  display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.devchip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; transition: background .4s, box-shadow .4s; }
+.devchip.on .dot { background: var(--good); box-shadow: 0 0 10px var(--good); }
+.devchip.wait .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); animation: blink 1.4s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+.devchip .n { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devchip .s { color: var(--dim); font-size: 12px; }
+.devchip .bat { margin-left: auto; font-size: 12.5px; color: var(--dim); }
+nav { display: flex; flex-direction: column; gap: 3px; }
+nav button {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 11px;
+  background: none; color: var(--dim); cursor: pointer; text-align: left; font-weight: 500; transition: background .2s, color .2s;
+}
+nav button:hover { background: var(--panel); color: var(--text); }
+nav button.on { background: linear-gradient(90deg, rgba(var(--accent-rgb), .16), rgba(var(--accent-rgb), .04)); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+nav button.on svg { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+.connect { padding: 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; }
+.connect .row { display: flex; gap: 8px; }
+.side-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+
+/* ------------------------------------------------------------- controls --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px;
+  border-radius: 10px; border: 1px solid var(--line-hi); background: rgba(255,255,255,.05); cursor: pointer;
+  font-weight: 550; font-size: 13px; white-space: nowrap; transition: background .2s, border-color .2s, transform .1s, box-shadow .2s;
+}
+.btn:hover { background: rgba(255,255,255,.09); }
+.btn:active { transform: translateY(1px); }
+.btn.primary {
+  border-color: transparent; color: #1a0f13;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 100%, white 18%), var(--accent));
+  box-shadow: 0 6px 18px rgba(var(--accent-rgb), .28), inset 0 1px 0 rgba(255,255,255,.35);
+}
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.danger { color: #ffb3b9; border-color: rgba(255,100,112,.35); background: rgba(255,100,112,.08); }
+.btn.ghost { background: none; border-color: transparent; color: var(--dim); }
+.btn.ghost:hover { color: var(--text); background: var(--panel); }
+.btn.sm { height: 30px; padding: 0 11px; font-size: 12.5px; border-radius: 9px; }
+.btn.icon { width: 36px; padding: 0; }
+.btn:disabled { opacity: .45; pointer-events: none; }
+.btn.grow { flex: 1; }
+select, input[type=text] {
+  height: 36px; width: 100%; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-hi);
+  background: rgba(0,0,0,.25); outline: none; transition: border-color .2s, box-shadow .2s;
+}
+select { appearance: none; padding-right: 32px; cursor: pointer;
+  background: rgba(0,0,0,.25) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238d8d9a' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center; }
+select option { background: #17171d; }
+select:focus, input[type=text]:focus { border-color: rgba(var(--accent-rgb), .7); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .15); }
+input[type=text] { user-select: text; }
+.switch { position: relative; width: 42px; height: 24px; flex: none; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 99px; background: rgba(255,255,255,.12); transition: background .25s; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,.35); transition: transform .25s cubic-bezier(.3,1.4,.5,1); }
+.switch input:checked + i { background: var(--accent); box-shadow: 0 0 14px rgba(var(--accent-rgb), .35); }
+.switch input:checked + i::after { transform: translateX(18px); }
+input[type=range] { -webkit-appearance: none; width: 100%; height: 22px; background: none; cursor: pointer; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent) 0 var(--p, 50%), rgba(255,255,255,.1) var(--p, 50%) 100%);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .25), 0 2px 8px rgba(0,0,0,.5); transition: box-shadow .2s;
+}
+input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), .3), 0 2px 8px rgba(0,0,0,.5); }
+
+/* ----------------------------------------------------------------- main --- */
+main { position: relative; z-index: 1; overflow-y: auto; overflow-x: hidden; padding: 26px 30px 40px; }
+.top { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.top h1 { margin: 0; font: 600 25px/1.2 var(--font-d); letter-spacing: -.01em; }
+.top .sub { color: var(--dim); font-size: 13px; margin-top: 2px; }
+.top .grow { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 99px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; color: var(--dim); font-weight: 550; }
+.pill .d { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+section[data-page] { display: none; animation: rise .35s cubic-bezier(.2,.8,.2,1); }
+section[data-page].on { display: block; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+.card {
+  position: relative; border-radius: var(--r); padding: 18px 20px; overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.018));
+  border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.card h3 { margin: 0 0 12px; font: 600 11.5px/1 var(--font); letter-spacing: .09em; text-transform: uppercase; color: var(--dim);
+  display: flex; align-items: center; gap: 8px; }
+.card h3 svg { width: 15px; height: 15px; }
+.big { font: 300 46px/1.05 var(--font-d); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.big small { font-size: .45em; font-weight: 400; color: var(--dim); margin-left: 4px; letter-spacing: 0; }
+.rows { display: grid; gap: 1px; margin-top: 12px; }
+.rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.045); font-size: 13px; }
+.rows > div:first-child { border-top: 0; }
+.rows span:first-child { color: var(--dim); }
+.rows span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+.muted { color: var(--faint); }
+.span-8 { grid-column: span 8; } .span-7 { grid-column: span 7; } .span-6 { grid-column: span 6; }
+.span-5 { grid-column: span 5; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; } .span-12 { grid-column: span 12; }
+@media (max-width: 1180px) {
+  .span-8, .span-7, .span-6, .span-5, .span-4, .span-3 { grid-column: span 6; }
+  .hero, .wide-sm { grid-column: span 12 !important; }
+}
+
+/* hero */
+.hero { display: grid; grid-template-columns: 230px 1fr; gap: 10px; min-height: 330px; padding: 0; }
+.rigbox { position: relative; display: grid; place-items: center; overflow: hidden; }
+.rigbox::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 50% at 50% 78%, var(--glow, rgba(var(--accent-rgb), .25)), transparent 70%); transition: background 1s; }
+.rigwrap { position: relative; height: 290px; aspect-ratio: var(--rig-ar, .44); margin-top: 10px; filter: drop-shadow(0 18px 24px rgba(0,0,0,.55)); }
+.rigwrap img { position: absolute; display: block; }
+.rigwrap .main { inset: 0; width: 100%; height: 100%; }
+.rigbox .floor { position: absolute; bottom: 14px; left: 50%; width: 150px; height: 18px; transform: translateX(-50%);
+  border-radius: 50%; background: radial-gradient(closest-side, var(--floor, rgba(var(--accent-rgb), .55)), transparent); filter: blur(4px); transition: background 1s; }
+.heroinfo { padding: 22px 24px 20px 6px; display: flex; flex-direction: column; }
+.heroinfo .state { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
+  font-weight: 600; font-size: 13px; background: rgba(255,255,255,.06); border: 1px solid var(--line); }
+.heroinfo .state .d { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+.gaugewrap { display: flex; align-items: center; gap: 22px; margin: 14px 0 6px; }
+.gauge { position: relative; width: 176px; height: 176px; flex: none; }
+.gauge svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(135deg); }
+.gauge .trk { stroke: rgba(255,255,255,.08); }
+.gauge .val { stroke: url(#gaugeGrad); transition: stroke-dasharray .8s cubic-bezier(.2,.8,.2,1); filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), .45)); }
+.gauge .mid { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+.gauge .mid b { display: block; font: 300 44px/1 var(--font-d); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.gauge .mid span { color: var(--dim); font-size: 12px; }
+.herorows { flex: 1; }
+.herorows .rows { margin-top: 0; }
+
+/* battery capsule */
+.capsule { position: relative; height: 34px; border-radius: 11px; margin: 14px 10px 4px 0; background: rgba(255,255,255,.06);
+  border: 1px solid var(--line-hi); overflow: hidden; }
+.capsule::after { content: ""; position: absolute; right: -9px; top: 10px; width: 6px; height: 12px; border-radius: 0 4px 4px 0; background: rgba(255,255,255,.18); }
+.capsule .fill { position: absolute; inset: 3px auto 3px 3px; border-radius: 8px; transition: width .8s cubic-bezier(.2,.8,.2,1), background .6s;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bc) 70%, black), var(--bc)); box-shadow: 0 0 18px color-mix(in srgb, var(--bc) 45%, transparent); }
+.capsule.chg .fill::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%); background-size: 220% 100%; animation: sheen 2.2s linear infinite; }
+@keyframes sheen { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.capsule .bolt { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .4s; }
+.capsule.chg .bolt { opacity: 1; }
+.capsule .bolt svg { width: 18px; height: 18px; fill: #fff; stroke: none; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
+
+/* rings */
+.ringrow { display: flex; align-items: center; gap: 14px; }
+.ring { position: relative; width: 96px; height: 96px; flex: none; }
+#healthTop > div > span { white-space: nowrap; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring .mid { position: absolute; inset: 0; display: grid; place-items: center; font: 300 23px/1 var(--font-d); font-variant-numeric: tabular-nums; }
+.ring .mid small { display: block; font-size: 11px; color: var(--dim); margin-top: 3px; text-align: center; }
+
+/* bars */
+.bars { display: flex; align-items: flex-end; gap: 5px; height: 74px; margin: 14px 0 4px; }
+.bars div { flex: 1; border-radius: 5px 5px 2px 2px; background: rgba(255,255,255,.08); min-height: 3px; position: relative; transition: height .6s; }
+.bars div.today { background: linear-gradient(180deg, var(--accent), rgba(var(--accent-rgb), .5)); box-shadow: 0 0 14px rgba(var(--accent-rgb), .35); }
+.bars div.has { background: linear-gradient(180deg, rgba(var(--accent-rgb), .55), rgba(var(--accent-rgb), .18)); }
+.barlab { display: flex; justify-content: space-between; color: var(--faint); font-size: 11px; }
+
+/* tables */
+.tablewrap { max-height: 520px; overflow: auto; margin: 0 -20px -18px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { position: sticky; top: 0; background: #15151b; color: var(--faint); font-weight: 600; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; text-align: left; padding: 9px 10px; white-space: nowrap; }
+td { white-space: nowrap; padding: 10px; border-top: 1px solid rgba(255,255,255,.045); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { padding-left: 20px; } th:last-child, td:last-child { padding-right: 20px; }
+tr:hover td { background: rgba(255,255,255,.025); }
+.range { position: relative; width: 70px; height: 8px; border-radius: 6px; background: rgba(255,255,255,.07); display: inline-block; vertical-align: middle; margin-right: 10px; }
+.range i { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, rgba(94,229,154,.5), var(--good)); }
+.chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11.5px; background: rgba(255,255,255,.06); color: var(--dim); }
+.chip.warn { background: rgba(246,184,75,.12); color: #f6c877; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+.tile .big { font-size: 34px; }
+.tile .lab { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
+
+/* overlay page */
+.ovgrid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.segs { display: flex; gap: 4px; padding: 4px; border-radius: 13px; background: var(--panel); border: 1px solid var(--line); margin-bottom: 14px; flex-wrap: wrap; }
+.segs button { flex: 1; border: 0; background: none; color: var(--dim); height: 34px; padding: 0 12px; border-radius: 9px; cursor: pointer; font-weight: 550; font-size: 13px; white-space: nowrap; transition: background .2s, color .2s; }
+.segs button:hover { color: var(--text); }
+.segs button.on { background: rgba(255,255,255,.09); color: var(--text); box-shadow: 0 2px 10px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.06); }
+.previewcard { position: sticky; top: 0; padding: 16px; }
+.preview { position: relative; aspect-ratio: 1080 / 1800; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  background: repeating-conic-gradient(#15151b 0 25%, #111116 0 50%) 0 0 / 22px 22px; }
+.preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.preview .tag { position: absolute; top: 10px; left: 10px; z-index: 2; }
+.tests { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.tests .btn { padding: 0 6px; }
+.tests .btn.on { border-color: rgba(var(--accent-rgb), .7); background: rgba(var(--accent-rgb), .14); color: var(--text); }
+.urlrow { display: flex; gap: 8px; margin-top: 12px; }
+.urlrow code { flex: 1; display: flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 10px; background: rgba(0,0,0,.3); border: 1px solid var(--line); font: 12.5px Consolas, monospace; color: var(--dim); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: text; }
+.hint { color: var(--faint); font-size: 12px; margin-top: 10px; line-height: 1.5; }
+
+/* settings fields */
+.fields { display: grid; gap: 14px; }
+.group { padding: 6px 20px 8px; }
+.group h4 { margin: 12px 0 4px; font: 600 11.5px/1 var(--font); letter-spacing: .09em; text-transform: uppercase; color: var(--dim); }
+.f { display: grid; grid-template-columns: minmax(150px, 34%) 1fr; align-items: center; gap: 16px; padding: 11px 0; border-top: 1px solid rgba(255,255,255,.045); transition: opacity .25s; }
+.group h4 + .f { border-top: 0; }
+.f.toggle { grid-template-columns: 1fr auto; }
+.f.slider .ctl { display: grid; grid-template-columns: 1fr 58px; align-items: center; gap: 12px; }
+.f .val { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); background: rgba(255,255,255,.06); border-radius: 7px; padding: 3px 7px; }
+.f label { color: #c9c9d3; font-size: 13.5px; }
+.f.off { opacity: .35; pointer-events: none; }
+.f .ctl.duo { display: flex; gap: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.swatches button { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; position: relative;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); transition: transform .15s; }
+.swatches button:hover { transform: scale(1.1); }
+.swatches button.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.12), 0 0 12px var(--c, transparent); }
+.swatches button.ed { background: conic-gradient(from 200deg, var(--edacc), color-mix(in srgb, var(--edacc) 60%, white), var(--edacc)); }
+.swatches button.rb { background: conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red); }
+.swatches .custom { position: relative; width: 28px; height: 28px; border-radius: 50%; overflow: hidden; border: 2px dashed rgba(255,255,255,.3); }
+.swatches .custom input { position: absolute; inset: -8px; width: 44px; height: 44px; border: 0; padding: 0; cursor: pointer; background: none; }
+.swatches .custom.on { border: 2px solid #fff; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
+.pagefoot { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+/* explorer */
+pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; border-radius: 12px; background: rgba(0,0,0,.35);
+  border: 1px solid var(--line); font: 12.5px/1.55 Consolas, "Cascadia Mono", monospace; color: #c8c8d4; user-select: text; white-space: pre-wrap; }
+
+/* toasts + modal */
+#toasts { position: fixed; right: 22px; bottom: 22px; z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast { max-width: 420px; padding: 11px 15px; border-radius: 12px; background: rgba(24,24,30,.92); border: 1px solid var(--line-hi);
+  box-shadow: 0 12px 30px rgba(0,0,0,.45); backdrop-filter: blur(10px); font-size: 13px; animation: tin .35s cubic-bezier(.2,.9,.3,1.2); }
+.toast.out { opacity: 0; transform: translateY(6px); transition: .3s; }
+@keyframes tin { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+.modal { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; background: rgba(5,5,8,.6); backdrop-filter: blur(6px); }
+.modal.on { display: grid; animation: fade .2s; }
+@keyframes fade { from { opacity: 0; } }
+.dialog { width: min(440px, 92vw); padding: 22px; border-radius: 18px; background: #16161c; border: 1px solid var(--line-hi); box-shadow: 0 30px 80px rgba(0,0,0,.6); animation: rise .3s cubic-bezier(.2,.9,.3,1.2); }
+.dialog h2 { margin: 0 0 8px; font: 600 18px/1.3 var(--font-d); }
+.dialog p { margin: 0 0 18px; color: var(--dim); }
+.dialog .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.drop { display: grid; place-items: center; gap: 6px; height: 150px; border-radius: 14px; border: 2px dashed rgba(255,255,255,.15); color: var(--dim); text-align: center; cursor: pointer; transition: border-color .2s, background .2s; overflow: hidden; }
+.drop:hover, .drop.over { border-color: rgba(var(--accent-rgb), .7); background: rgba(var(--accent-rgb), .06); }
+.drop img { max-height: 130px; }
+.empty { color: var(--faint); text-align: center; padding: 30px 0; }
+.nobt { margin-bottom: 16px; border-color: rgba(246,184,75,.3); background: rgba(246,184,75,.06); color: #f6c877; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--g1, #ffb35c)"/><stop offset="1" stop-color="var(--g2, #ff6a8a)"/>
+    </linearGradient>
+  </defs>
+  <symbol id="i-dash" viewBox="0 0 24 24"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4.5-5"/><circle cx="12" cy="16" r="1.4"/></symbol>
+  <symbol id="i-hist" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-ov" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M3.5 12.2l8.5 4.5 8.5-4.5"/><path d="M3.5 16.4l8.5 4.5 8.5-4.5"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h9M18 7h2M4 17h3M12 17h8"/><circle cx="15.5" cy="7" r="2.3"/><circle cx="9.5" cy="17" r="2.3"/></symbol>
+  <symbol id="i-exp" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M7.5 10l3 2.2-3 2.2M12.5 15h4"/></symbol>
+  <symbol id="i-bt" viewBox="0 0 24 24"><path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5v4h-4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5L5 13.5h6l-1 8 8.5-11h-6z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21c-3.9 0-6.5-2.7-6.5-6.2 0-3.1 2.3-5.1 3.6-7.6.3 1.8 1.4 2.9 2.5 3.3 0-3.1 1.5-5.6 3.5-7 0 3.5 3.4 5.3 3.4 10.6 0 4-2.8 6.9-6.5 6.9z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/><path d="M8 12.5h2.2l1.2-2.2 1.6 4 1.1-1.8H16"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></symbol>
+  <symbol id="i-count" viewBox="0 0 24 24"><path d="M4 19.5h16"/><path d="M7 16V11M12 16V6M17 16v-7"/></symbol>
+  <symbol id="i-bat" viewBox="0 0 24 24"><rect x="3" y="7.5" width="16" height="9" rx="2.5"/><path d="M21 10.5v3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-tray" viewBox="0 0 24 24"><path d="M4 14.5l2.4-8.2A2 2 0 0 1 8.3 5h7.4a2 2 0 0 1 1.9 1.3l2.4 8.2"/><path d="M4 14.5h4.5l1.2 2.5h4.6l1.2-2.5H20v3.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
+</svg>
+
+<aside class="side">
+  <div class="brand"><img src="/icon.png" alt=""><div><b>Puffco Monitor</b><span id="ver">v2</span></div></div>
+  <div class="devchip" id="devchip"><span class="dot"></span><div style="min-width:0"><div class="n" id="devName">No rig</div><div class="s" id="devState">Not connected</div></div><div class="bat num" id="devBat"></div></div>
+  <nav id="nav">
+    <button data-go="dashboard" class="on"><svg class="i"><use href="#i-dash"/></svg>Dashboard</button>
+    <button data-go="history"><svg class="i"><use href="#i-hist"/></svg>History</button>
+    <button data-go="overlay"><svg class="i"><use href="#i-ov"/></svg>OBS overlay</button>
+    <button data-go="settings"><svg class="i"><use href="#i-set"/></svg>Settings</button>
+    <button data-go="explorer"><svg class="i"><use href="#i-exp"/></svg>Explorer</button>
+  </nav>
+  <div class="side-foot">
+    <div class="connect">
+      <div class="side-label">Rig</div>
+      <select id="devSel"></select>
+      <div class="row">
+        <button class="btn icon" id="scanBtn" title="Scan for rigs"><svg class="i"><use href="#i-scan"/></svg></button>
+        <button class="btn primary grow" id="connBtn"><svg class="i"><use href="#i-bt"/></svg><span>Connect</span></button>
+      </div>
+    </div>
+    <button class="btn ghost" id="trayBtn" title="Keep running in the tray"><svg class="i"><use href="#i-tray"/></svg>Hide to tray</button>
+  </div>
+</aside>
+
+<main id="main">
+  <div class="top">
+    <div><h1 id="title">Dashboard</h1><div class="sub" id="subtitle"></div></div>
+    <div class="grow"></div>
+    <div class="pill" id="phasePill"><span class="d"></span><span id="phaseTxt">Offline</span></div>
+  </div>
+
+  <!-- ============================================================ dashboard -->
+  <section data-page="dashboard" class="on">
+    <div class="card nobt" id="noBt" style="display:none">Bluetooth support isn't installed, so the rig can't connect. If you're running from source:  pip install bleak</div>
+    <div class="grid">
+      <div class="card hero span-8">
+        <div class="rigbox"><div class="rigwrap" id="rigwrap"><img class="main" id="rigImg" alt=""><img id="rigKnob" alt=""></div><div class="floor"></div></div>
+        <div class="heroinfo">
+          <div class="state" id="stateChip"><span class="d"></span><span id="stateTxt">Offline</span></div>
+          <div class="gaugewrap">
+            <div class="gauge">
+              <svg viewBox="0 0 100 100"><circle class="trk" cx="50" cy="50" r="42" fill="none" stroke-width="7" pathLength="100" stroke-dasharray="75 100" stroke-linecap="round"/>
+                <circle class="val" id="gaugeVal" cx="50" cy="50" r="42" fill="none" stroke-width="7" pathLength="100" stroke-dasharray="0 100" stroke-linecap="round"/></svg>
+              <div class="mid"><div><b id="tempBig">—</b><span id="tempSub">chamber</span></div></div>
+            </div>
+            <div class="herorows"><div class="rows" id="heroRows"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card span-4">
+        <h3><svg class="i"><use href="#i-bat"/></svg>Battery</h3>
+        <div class="big" id="batBig">—</div>
+        <div class="capsule" id="capsule"><div class="fill" id="capFill" style="width:0"></div><div class="bolt"><svg class="i"><use href="#i-bolt"/></svg></div></div>
+        <div class="rows" id="batRows"></div>
+      </div>
+      <div class="card span-4">
+        <h3><svg class="i"><use href="#i-count"/></svg>Lifetime</h3>
+        <div class="big" id="dabsBig">—<small>dabs</small></div>
+        <div class="bars" id="bars"></div><div class="barlab" id="barlab"></div>
+        <div class="rows" id="lifeRows"></div>
+      </div>
+      <div class="card span-4">
+        <h3><svg class="i"><use href="#i-heart"/></svg>Battery health</h3>
+        <div class="ringrow">
+          <div class="ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="8"/>
+            <circle id="healthRing" cx="50" cy="50" r="42" fill="none" stroke="var(--good)" stroke-width="8" pathLength="100" stroke-dasharray="0 100" stroke-linecap="round" style="transition:stroke-dasharray .8s;filter:drop-shadow(0 0 6px rgba(94,229,154,.4))"/></svg>
+            <div class="mid"><div><span id="healthPct">—</span><small>health</small></div></div></div>
+          <div class="rows" style="flex:1;margin:0" id="healthTop"></div>
+        </div>
+        <div class="rows" id="healthRows"></div>
+        <div class="hint">Estimated from the battery gauge. Health compares today's capacity with the best this rig has measured.</div>
+      </div>
+      <div class="card span-4">
+        <h3><svg class="i"><use href="#i-chip"/></svg>Device</h3>
+        <div class="rows" id="devRows" style="margin-top:4px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================== history -->
+  <section data-page="history">
+    <div class="tiles" id="tiles"></div>
+    <div class="grid">
+      <div class="card span-7 wide-sm"><h3><svg class="i"><use href="#i-bolt"/></svg>Charges</h3><div class="tablewrap"><table id="chargeTbl"></table></div></div>
+      <div class="card span-5 wide-sm"><h3><svg class="i"><use href="#i-flame"/></svg>Sessions</h3><div class="tablewrap"><table id="sessTbl"></table></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================== overlay -->
+  <section data-page="overlay">
+    <div class="ovgrid">
+      <div>
+        <div class="segs" id="ovTabs"></div>
+        <div id="ovPages"></div>
+      </div>
+      <div class="card previewcard">
+        <h3>Live preview <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">· exactly what OBS shows</span></h3>
+        <div class="preview"><iframe id="ovFrame" src="/overlay" title="Overlay preview" style="color-scheme: normal"></iframe></div>
+        <div class="tests" id="tests"></div>
+        <div class="urlrow"><code id="ovUrl"></code><button class="btn icon" id="copyUrl" title="Copy"><svg class="i"><use href="#i-copy"/></svg></button></div>
+        <div class="hint">In OBS add a <b>Browser</b> source with this URL, Width 1080 and Height 1800, then shrink it into place. Changes here show up live.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= settings -->
+  <section data-page="settings">
+    <div style="max-width:820px">
+      <div id="appFields" class="fields"></div>
+      <div class="card" style="margin-top:14px"><h3>About</h3><div class="rows" id="aboutRows"></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= explorer -->
+  <section data-page="explorer">
+    <div class="card" style="max-width:980px">
+      <h3><svg class="i"><use href="#i-exp"/></svg>Read any value on the rig</h3>
+      <div class="hint" style="margin:0 0 12px">Battery cycles and health aren't documented by Puffco, so “Find battery data” tries every likely path and lists the ones that answer.</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="pathIn" value="/p/bat/soc" spellcheck="false" style="font-family:Consolas,monospace">
+        <button class="btn" id="readBtn">Read</button>
+        <button class="btn primary" id="probeBtn">Find battery data</button>
+      </div>
+      <pre class="log" id="log"></pre>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+        <button class="btn sm ghost" id="clearLog">Clear</button><button class="btn sm" id="copyLog"><svg class="i"><use href="#i-copy"/></svg>Copy all</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toasts"></div>
+<div class="modal" id="modal"><div class="dialog" id="dialog"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let S = null, SCH = null, page = 'dashboard', lastStatusT = 0, logSeen = -1;
+const pending = {};        // settings the user just changed: don't let a slow poll snap them back
+
+// ---------------------------------------------------------------- server ---
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? { cache: 'no-store' } :
+    { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Puffco': '1' }, body: JSON.stringify(body) });
+  return r.json();
+}
+const act = (a, extra = {}) => api('/api/do', { a, ...extra }).then(() => poll());
+const sendTimers = {};
+function setSetting(store, k, v) {
+  S[store][k] = v;
+  pending[store + k] = Date.now() + 2500;
+  clearTimeout(sendTimers[store + k]);
+  sendTimers[store + k] = setTimeout(() => api(store === 'ov' ? '/api/ov' : '/api/cfg', { [k]: v }), 90);
+  refreshConds();
+  if (store === 'ov' && (k === 'light' || k === 'edition')) applyAccent();
+  if (store === 'cfg' && k === 'units') renderAll();
+}
+
+// ---------------------------------------------------------------- format ---
+const units = () => (S && S.cfg.units) || 'F';
+const fmtT = f => f == null ? '—' : units() === 'C' ? `${Math.round((f - 32) * 5 / 9)}°C` : `${Math.round(f)}°F`;
+function fmtDur(sec) {
+  if (sec == null) return '—';
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(s).padStart(2, '0')}s`;
+}
+const fmtDate = ts => { const d = new Date(ts * 1000);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + '  ·  ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+const n0 = (x, d = 0) => x == null ? '—' : Number(x).toLocaleString([], { maximumFractionDigits: d, minimumFractionDigits: d });
+const rows = (el, list) => { el.innerHTML = list.map(([a, b]) => `<div><span>${esc(a)}</span><span>${b}</span></div>`).join(''); };
+const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+
+// ------------------------------------------------------------------- nav ---
+const TITLES = { dashboard: ['Dashboard', ''], history: ['History', 'Every charge and session the app has seen'],
+  overlay: ['OBS overlay', 'Your rig on stream - everything here is live'], settings: ['Settings', 'How Puffco Monitor behaves'],
+  explorer: ['Explorer', 'Raw values straight from the rig'] };
+function go(p) {
+  page = p;
+  $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.go === p));
+  $$('section[data-page]').forEach(s => s.classList.toggle('on', s.dataset.page === p));
+  $('#title').textContent = TITLES[p][0];
+  if (S) renderAll();
+  $('#main').scrollTop = 0;
+}
+$$('#nav button').forEach(b => b.onclick = () => go(b.dataset.go));
+
+// ------------------------------------------------------------------- toasts ---
+function toast(msg, ms = 4200) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  $('#toasts').append(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, ms);
+}
+function dialog(html, onOk, okText = 'OK', danger = false) {
+  $('#dialog').innerHTML = html + `<div class="acts"><button class="btn ghost" data-x>Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${okText}</button></div>`;
+  $('#modal').classList.add('on');
+  const close = () => $('#modal').classList.remove('on');
+  $('#dialog [data-x]').onclick = close;
+  $('#dialog [data-ok]').onclick = async () => { if (await onOk() !== false) close(); };
+}
+$('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').classList.remove('on'); };
+const confirmAct = (title, text, a, ok, danger = true) =>
+  dialog(`<h2>${title}</h2><p>${text}</p>`, () => act(a), ok, danger);
+
+// ---------------------------------------------------------------- accent ---
+let rigMeta = {}, rigFor = null;
+function accentHex() {
+  const l = S.ov.light;
+  return typeof l === 'string' && l.startsWith('#') ? l : S.accent || '#ff8a9a';
+}
+function applyAccent() {
+  const hex = accentHex(), rgb = hexRgb(hex) || [255, 138, 154];
+  document.documentElement.style.setProperty('--accent', hex);
+  document.documentElement.style.setProperty('--accent-rgb', rgb.join(','));
+  document.documentElement.style.setProperty('--edacc', S.accent || '#ff8a9a');
+}
+async function loadRig() {
+  const ed = S.ov.edition;
+  if (!ed || ed === rigFor) return;
+  rigFor = ed;
+  const dir = '/rigs/' + encodeURIComponent(ed) + '/';
+  try { rigMeta = await (await fetch(dir + 'rig.json', { cache: 'no-store' })).json(); } catch (e) { rigMeta = {}; }
+  const v = '?v=' + Date.now();
+  $('#rigImg').src = dir + 'rig.png' + v;
+  const k = $('#rigKnob');
+  if (rigMeta.knob) {
+    const [x0, y0, x1, y1] = rigMeta.knob.box;
+    Object.assign(k.style, { display: 'block', left: x0 * 100 + '%', top: y0 * 100 + '%', width: (x1 - x0) * 100 + '%', height: (y1 - y0) * 100 + '%' });
+    k.src = dir + 'knob.png' + v;
+  } else k.style.display = 'none';
+  if (rigMeta.width) $('#rigwrap').style.setProperty('--rig-ar', rigMeta.width / rigMeta.height);
+}
+
+// ------------------------------------------------------------- sidebar ---
+const PHASE = { off: ['Offline', 'var(--faint)'], standby: ['Standby', 'var(--dim)'], heating: ['Heating up', 'var(--hot)'],
+  active: ['Boofin', 'var(--accent)'], cooldown: ['Cooling down', 'var(--cool)'] };
+function phaseInfo() {
+  const L = S.live, ph = S.phase;
+  if (ph === 'standby' && [0, 1, 2, 3].includes(L.charge)) return [L.charge === 2 ? 'Fully charged' : 'Charging', 'var(--good)'];
+  if (ph === 'active') return [S.ov.txt_active || 'Boofin', 'var(--accent)'];
+  return PHASE[ph] || PHASE.off;
+}
+function renderSide() {
+  const chip = $('#devchip'), L = S.live;
+  chip.classList.toggle('on', S.link === 'connected');
+  chip.classList.toggle('wait', S.link === 'connecting' || S.link === 'waiting');
+  $('#devName').textContent = S.static.name || (S.device && S.device.name) || 'No rig yet';
+  $('#devState').textContent = { connected: 'Connected', connecting: 'Connecting…', waiting: 'Waiting for the rig…', off: 'Not connected' }[S.link];
+  $('#devBat').textContent = S.link === 'connected' && L.battery != null ? `${Math.round(L.battery)}%` : '';
+  const sel = $('#devSel'), opts = S.devices.map((d, i) => `<option value="${i}">${esc(d[0])}  ·  ${esc(d[1])}</option>`).join('') || '<option>No rigs found - hit scan</option>';
+  if (sel.dataset.v !== opts) { sel.innerHTML = opts; sel.dataset.v = opts; }
+  sel.disabled = S.link !== 'off' || !S.devices.length;
+  const on = S.link !== 'off';
+  $('#connBtn span').textContent = on ? 'Disconnect' : 'Connect';
+  $('#connBtn').classList.toggle('primary', !on);
+  $('#scanBtn').disabled = on || !S.bleak;
+  $('#connBtn').disabled = !S.bleak;
+  $('#trayBtn').style.display = S.window ? '' : 'none';
+  const [txt, col] = phaseInfo();
+  $('#phaseTxt').textContent = txt;
+  $('#phasePill').style.color = col;
+  $('#ver').textContent = 'v' + S.version + (S.frozen ? '' : ' · source');
+  $('#noBt').style.display = S.bleak ? 'none' : '';
+}
+$('#scanBtn').onclick = () => { act('scan'); toast('Scanning for rigs - wake yours with a press of the button.'); };
+$('#connBtn').onclick = () => S.link !== 'off' ? act('disconnect') : act('connect', { index: +$('#devSel').value || 0 });
+$('#trayBtn').onclick = () => act('hide');
+
+// ----------------------------------------------------------- dashboard ---
+function renderDash() {
+  const L = S.live, conn = S.link === 'connected', ph = S.phase;
+  loadRig();
+  // hero
+  const [txt, col] = phaseInfo();
+  $('#stateTxt').textContent = conn ? txt : S.link === 'off' ? 'Not connected' : 'Waiting for the rig';
+  $('#stateChip').style.color = conn ? col : 'var(--faint)';
+  const glow = !conn ? 'rgba(255,255,255,.04)' : ph === 'heating' ? 'rgba(255,138,60,.30)' : ph === 'active' ? `rgba(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')}, .42)` :
+               [0, 1, 3].includes(L.charge) ? 'rgba(94,229,154,.22)' : 'rgba(var(--accent-rgb), .16)';
+  $('.rigbox').style.setProperty('--glow', glow);
+  $('.rigbox').style.setProperty('--floor', conn ? glow.replace(/[\d.]+\)$/, '.7)') : 'transparent');
+  $('#rigwrap').style.opacity = conn ? 1 : .55;
+  $('#rigwrap').style.filter = conn ? '' : 'grayscale(.5) drop-shadow(0 18px 24px rgba(0,0,0,.55))';
+  const temp = conn ? L.temp : null, target = L.target || 500;
+  $('#tempBig').textContent = temp == null ? '—' : fmtT(temp);
+  const frac = temp == null ? 0 : Math.max(0, Math.min(1, (temp - 70) / Math.max(60, target - 70)));
+  $('#gaugeVal').setAttribute('stroke-dasharray', `${(frac * 75).toFixed(1)} 100`);
+  const hot = ph === 'heating' || ph === 'active';
+  document.documentElement.style.setProperty('--g1', hot ? '#ffb35c' : '#7b8cff');
+  document.documentElement.style.setProperty('--g2', ph === 'active' ? accentHex() : hot ? '#ff7a45' : '#a98bff');
+  $('#tempSub').textContent = ph === 'heating' ? `${Math.round(frac * 100)}% to target` : 'chamber';
+  const prof = L.profile || (L.profile_slot != null ? `Slot ${L.profile_slot + 1}` : null);
+  rows($('#heroRows'), [
+    ['Target', conn && L.target ? fmtT(L.target) : '—'], ['Profile', esc(prof || '—')],
+    ['Chamber', esc(S.labels.chamber || '—')], ['Heating for', fmtDur(S.heating_for)],
+    ['State', S.labels.state ? esc(S.labels.state) : '—'],
+  ]);
+  // battery
+  const bat = conn ? L.battery : null, chg = conn && [0, 1, 3].includes(L.charge);
+  $('#batBig').innerHTML = bat == null ? '—' : `${Math.round(bat)}<small>%</small>`;
+  const bc = bat == null ? '#555' : bat > 40 ? 'var(--good)' : bat > 15 ? 'var(--warn)' : 'var(--bad)';
+  $('#capsule').style.setProperty('--bc', bc);
+  $('#capFill').style.width = `calc(${Math.max(0, Math.min(100, bat || 0))}% - 6px)`;
+  $('#capsule').classList.toggle('chg', !!chg);
+  const c = S.charging;
+  rows($('#batRows'), [
+    ['Status', esc(conn ? S.labels.charge || '—' : '—')], ['Source', esc(conn ? S.labels.source || '—' : '—')],
+    ['Charging for', c ? fmtDur(c.elapsed) + (c.note ? ' <span class="muted" title="Started before the app was open">+</span>' : '') : '—'],
+    ['Full in', !c ? '—' : c.eta === 0 ? 'Topping off' : c.eta == null ? `<span class="muted">${esc(c.how || 'learning…')}</span>` :
+      `${fmtDur(c.eta)} <span class="muted">· ${esc(c.clock)}</span>`],
+    ['Avg full charge', S.avg_full ? `${fmtDur(S.avg_full)} <span class="muted">(${S.avg_full_n})</span>` : '<span class="muted">needs a full charge</span>'],
+    ['Dabs left', L.drem != null && conn ? `~${n0(L.drem)}` : '—'],
+  ]);
+  // lifetime
+  $('#dabsBig').innerHTML = `${L.total_dabs != null ? n0(L.total_dabs) : '—'}<small>dabs</small>`;
+  const pd = S.per_day, mx = Math.max(1, ...pd.map(d => d[1]));
+  $('#bars').innerHTML = pd.map((d, i) => `<div class="${i === pd.length - 1 ? 'today' : d[1] ? 'has' : ''}" style="height:${Math.max(4, d[1] / mx * 100)}%" title="${esc(d[0])}: ${d[1]} sessions"></div>`).join('');
+  $('#barlab').innerHTML = `<span>${esc(pd[0][0])}</span><span>last 14 days</span><span>today</span>`;
+  const ht = L.heat_time;
+  rows($('#lifeRows'), [
+    ['Today', n0(S.today)], ['Per day', L.dpd != null ? n0(L.dpd, 1) : '—'], ['Avg session', fmtDur(S.avg_session)],
+    ['Battery per dab', S.bpd ? n0(S.bpd, 1) + '%' : '—'],
+    ['Total heat time', ht != null ? n0(ht / 3600, 1) + ' h' : '—'],
+    ['Avg heat per dab', ht != null && L.total_dabs ? n0(ht / L.total_dabs) + ' s' : '—'],
+  ]);
+  // health
+  const H = S.health, pct = H.pct;
+  $('#healthPct').textContent = pct == null ? '—' : Math.round(pct) + '%';
+  const hc = pct == null ? 'var(--faint)' : pct >= 85 ? 'var(--good)' : pct >= 70 ? 'var(--warn)' : 'var(--bad)';
+  $('#healthRing').setAttribute('stroke', hc);
+  $('#healthRing').setAttribute('stroke-dasharray', `${pct || 0} 100`);
+  rows($('#healthTop'), [['Capacity', H.wh ? n0(H.wh, 1) + ' Wh' : '—'], ['Cycles', H.cycles ? '~' + n0(H.cycles) : '—'],
+    ['Per charge', H.dpc ? '~' + n0(H.dpc) + ' dabs' : '—']]);
+  rows($('#healthRows'), [
+    ['Voltage', H.volt ? `${n0(H.volt, 2)} V <span class="muted">· ${n0(H.volt / H.cells, 2)} V/cell</span>` : '—'],
+    ['Battery temp', L.bat_temp != null && conn ? fmtT(L.bat_temp * 9 / 5 + 32) : '—'],
+    ['Current', L.current != null && conn ? `${n0(Math.abs(L.current), 2)} A${chg ? ' <span class="muted">charging</span>' : ''}` : '—'],
+  ]);
+  // device
+  const st = S.static;
+  rows($('#devRows'), [['Model', esc(st.model || '—')], ['Serial', esc(st.serial || '—')], ['Firmware', esc(st.firmware || '—')],
+    ['Uptime', L.uptime ? n0(L.uptime / 86400) + ' days' : '—'], ['Charges logged', n0(S.charges.length)],
+    ['Tracked cycles', H.tracked != null ? n0(H.tracked, 1) : '—'],
+    ['Second counter', L.dabs2 != null ? n0(L.dabs2) + ' dabs' : '—']]);
+  $('#subtitle').textContent = conn ? `${st.model || 'Puffco'} · ${st.name || ''}` : S.status || '';
+}
+
+// -------------------------------------------------------------- history ---
+let histKey = '';
+function renderHistory() {
+  const key = S.charges.length + '/' + S.sessions.length + '/' + units() + '/' + (S.sessions[0] || {}).time;
+  const tiles = [
+    [S.avg_full ? fmtDur(S.avg_full) : '—', 'Average full charge'],
+    [n0(S.charges.length), 'Charges logged'],
+    [n0(S.per_day.reduce((a, d) => a + d[1], 0)), 'Sessions in 14 days'],
+    [fmtDur(S.avg_session), 'Average session'],
+  ];
+  $('#tiles').innerHTML = tiles.map(([v, l]) => `<div class="card tile"><div class="big num">${v}</div><div class="lab">${l}</div></div>`).join('');
+  if (key === histKey) return;
+  histKey = key;
+  $('#chargeTbl').innerHTML = '<tr><th>Started</th><th>Battery</th><th>Took</th><th>Source</th></tr>' +
+    (S.charges.map(c => `<tr><td>${esc(fmtDate(c.start))}</td>
+      <td><span class="range"><i style="left:${c.start_pct}%;width:${Math.max(2, c.end_pct - c.start_pct)}%"></i></span>${Math.round(c.start_pct)}→${Math.round(c.end_pct)}%</td>
+      <td>${fmtDur(c.duration)}</td><td><span class="chip">${esc(c.source || '?')}</span>
+      ${!c.complete ? ' <span class="chip warn">unplugged early</span>' : ''}${c.joined_late ? ' <span class="chip">partly tracked</span>' : ''}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">No charges yet - they show up here as soon as one finishes.</td></tr>');
+  $('#sessTbl').innerHTML = '<tr><th>When</th><th>Length</th><th>Peak</th><th>Battery</th></tr>' +
+    (S.sessions.map(s => `<tr><td>${esc(fmtDate(s.time))}</td><td>${fmtDur(s.duration)}</td><td>${fmtT(s.peak_f)}</td>
+      <td>${s.battery_used != null ? n0(s.battery_used, 1) + '%' : '—'}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">No sessions yet.</td></tr>');
+}
+
+// ------------------------------------------------------- settings forms ---
+const condEls = [];
+function condOk(store, when) {
+  const list = Array.isArray(when[0]) ? when : [when];
+  return list.every(([k, v]) => (Array.isArray(v) ? v : [v]).includes(S[store][k]));
+}
+function refreshConds() { condEls.forEach(([el, store, when]) => el.classList.toggle('off', !condOk(store, when))); }
+const ACTIONS = {
+  clear_charges: () => confirmAct('Clear charge history?', 'Every logged charge is deleted. This also resets the average charge time and the full-in estimate.', 'clear_charges', 'Clear'),
+  clear_sessions: () => confirmAct('Clear session history?', 'Every logged session is deleted.', 'clear_sessions', 'Clear'),
+  reset_overlay: () => confirmAct('Reset the overlay?', 'Every overlay setting goes back to how it started. Your edition stays the same.', 'reset_overlay', 'Reset'),
+  open_folder: () => act('open_folder'),
+  quit: () => confirmAct('Quit Puffco Monitor?', 'The rig disconnects and the OBS overlay stops until you open the app again.', 'quit', 'Quit'),
+};
+function buildFields(container, fields, store, defaults) {
+  let group = null;
+  const newGroup = title => {
+    const card = document.createElement('div');
+    card.className = 'card group';
+    if (title) card.innerHTML = `<h4>${esc(title)}</h4>`;
+    container.append(card);
+    return card;
+  };
+  for (const f of fields) {
+    if (f.t === 'head') { group = newGroup(f.label); continue; }
+    if (!group) group = newGroup('');
+    const row = document.createElement('div');
+    row.className = 'f';
+    const k = f.k, get = () => S[store][k];
+    if (f.t === 'bool') {
+      row.classList.add('toggle');
+      row.innerHTML = `<label>${esc(f.label)}</label><span class="switch"><input type="checkbox"><i></i></span>`;
+      const cb = row.querySelector('input');
+      cb.onchange = () => setSetting(store, k, cb.checked);
+      row.querySelector('label').onclick = () => cb.click();
+      row.sync = () => { cb.checked = !!get(); };
+    } else if (f.t === 'choice') {
+      const opts = Object.entries(f.opts);
+      row.innerHTML = `<label>${esc(f.label)}</label><div class="ctl"><select>${opts.map(([l], i) => `<option value="${i}">${esc(l)}</option>`).join('')}</select></div>`;
+      const sel = row.querySelector('select');
+      sel.onchange = () => setSetting(store, k, opts[+sel.value][1]);
+      row.sync = () => { const i = opts.findIndex(o => o[1] === get()); sel.value = String(Math.max(0, i)); };
+    } else if (['pct', 'secs', 'num'].includes(f.t)) {
+      row.classList.add('slider');
+      const mul = f.t === 'pct' ? 0.01 : 1, step = f.step || (f.t === 'pct' ? 5 : 1);
+      const fmt = x => f.t === 'pct' ? `${Math.round(x)}%` : f.t === 'secs' ? `${+x.toFixed(1)} s` : f.fmt ? f.fmt.replace(/\{[^}]*\}/, Math.round(x)) : String(x);
+      row.innerHTML = `<label>${esc(f.label)}</label><div class="ctl"><input type="range" min="${f.lo}" max="${f.hi}" step="${step}"><span class="val"></span></div>`;
+      const r = row.querySelector('input'), val = row.querySelector('.val');
+      const paint = () => { r.style.setProperty('--p', ((r.value - f.lo) / (f.hi - f.lo) * 100) + '%'); val.textContent = fmt(+r.value); };
+      r.oninput = () => { paint(); setSetting(store, k, f.t === 'num' ? Math.round(+r.value) : Math.round(+r.value * mul * 10000) / 10000); };
+      r.ondblclick = () => { r.value = defaults[k] / mul; r.oninput(); };
+      r.title = 'Double-click to reset';
+      row.sync = () => { r.value = get() / mul; paint(); };
+    } else if (f.t === 'text') {
+      row.innerHTML = `<label>${esc(f.label)}</label><div class="ctl"><input type="text" spellcheck="false" placeholder="${esc(defaults[k])}"></div>`;
+      const inp = row.querySelector('input');
+      inp.oninput = () => setSetting(store, k, inp.value);
+      row.sync = () => { if (document.activeElement !== inp) inp.value = get() ?? ''; };
+    } else if (f.t === 'light') {
+      const presets = Object.entries(SCH.light_presets);
+      row.innerHTML = `<label>${esc(f.label)}</label><div class="ctl swatches">${presets.map(([n, v]) =>
+        `<button title="${esc(n)}" data-v="${esc(v)}" class="${v === 'edition' ? 'ed' : v === 'rainbow' ? 'rb' : ''}" style="${v.startsWith('#') ? `background:${v};--c:${v}` : ''}"></button>`).join('')}
+        <label class="custom" title="Pick any color"><input type="color"></label></div>`;
+      const pick = row.querySelector('input[type=color]');
+      row.querySelectorAll('button').forEach(b => b.onclick = () => setSetting(store, k, b.dataset.v));
+      pick.oninput = () => { setSetting(store, k, pick.value); api('/api/ov', { ov_custom: pick.value }); row.sync(); };
+      row.sync = () => {
+        const v = get(), known = presets.some(p => p[1] === v);
+        row.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+        row.querySelector('.custom').classList.toggle('on', !known);
+        if (!known && typeof v === 'string' && v.startsWith('#')) pick.value = v; else pick.value = S.ov_custom || '#ff5ca8';
+      };
+    } else if (f.t === 'edition') {
+      row.innerHTML = `<label>${esc(f.label)}</label><div class="ctl duo"><select></select><button class="btn sm"><svg class="i"><use href="#i-plus"/></svg>Add edition</button></div>`;
+      const sel = row.querySelector('select');
+      sel.onchange = () => setSetting(store, k, sel.value);
+      row.querySelector('button').onclick = addEdition;
+      row.sync = () => {
+        const html = S.editions.map(e => `<option>${esc(e)}</option>`).join('') || '<option>No editions yet</option>';
+        if (sel.dataset.v !== html) { sel.innerHTML = html; sel.dataset.v = html; }
+        sel.value = get();
+      };
+    } else if (f.t === 'buttons') {
+      row.className = 'btnrow';
+      row.innerHTML = f.items.map(([l, a]) => `<button class="btn sm ${a === 'quit' ? 'danger' : ''}" data-a="${a}">${esc(l)}</button>`).join('');
+      row.querySelectorAll('button').forEach(b => b.onclick = () => ACTIONS[b.dataset.a]());
+    }
+    if (f.when) condEls.push([row, store, f.when]);
+    group.append(row);
+    if (row.sync) syncers.push([row, store, k]);
+  }
+}
+const syncers = [];
+function syncFields() {
+  const now = Date.now();
+  for (const [row, store, k] of syncers) {
+    if (pending[store + k] > now) continue;
+    if (row.contains(document.activeElement) && document.activeElement.type === 'range') continue;
+    row.sync();
+  }
+  refreshConds();
+}
+
+// overlay page tabs
+let ovTab = 0;
+function buildOverlay() {
+  const tabs = $('#ovTabs'), pages = $('#ovPages');
+  SCH.ov_pages.forEach(([name, fields], i) => {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.onclick = () => { ovTab = i; tabs.querySelectorAll('button').forEach((x, j) => x.classList.toggle('on', j === i));
+      pages.querySelectorAll('.ovp').forEach((p, j) => p.style.display = j === i ? '' : 'none'); };
+    tabs.append(b);
+    const p = document.createElement('div');
+    p.className = 'ovp fields';
+    buildFields(p, fields, 'ov', SCH.ov_defaults);
+    const foot = document.createElement('div');
+    foot.className = 'pagefoot';
+    foot.innerHTML = '<button class="btn sm ghost">Reset this page</button>';
+    foot.querySelector('button').onclick = () => {
+      const keys = fields.filter(f => f.k && f.t !== 'edition').map(f => f.k);
+      keys.forEach(k => { S.ov[k] = SCH.ov_defaults[k]; delete pending['ov' + k]; });
+      api('/api/do', { a: 'reset_keys', keys }).then(() => { syncFields(); applyAccent(); });
+    };
+    p.append(foot);
+    pages.append(p);
+  });
+  tabs.querySelector('button').click();
+  const tests = [[null, 'Live'], ['standby', 'Standby'], ['heating', 'Heating'], ['active', 'Boofin'], ['charging', 'Charging'], ['cooldown', 'Cooling'], ['puff', 'Puff!']];
+  $('#tests').innerHTML = tests.map(([k, l]) => `<button class="btn sm ${k === 'puff' ? 'primary' : ''}" data-k="${k}">${k === 'puff' ? '<svg class="i"><use href="#i-play"/></svg>' : ''}${l}</button>`).join('')
+    + '<button class="btn sm ghost" data-k="obs" title="Open the overlay in your browser">Open</button>';
+  $$('#tests button').forEach(b => b.onclick = () => {
+    const k = b.dataset.k;
+    if (k === 'puff') act('puff');
+    else if (k === 'obs') act('open_overlay');
+    else act('preview', { key: k === 'null' ? null : k });
+  });
+  $('#copyUrl').onclick = () => copy(S.url, 'Overlay URL copied - paste it into an OBS Browser source.');
+}
+function renderOverlay() {
+  $('#ovUrl').textContent = S.url || 'Overlay server isn\'t running';
+  $$('#tests button').forEach(b => b.classList.toggle('on', b.dataset.k === String(S.preview)));
+}
+async function copy(text, msg) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast(msg);
+}
+
+// add-an-edition dialog
+function addEdition() {
+  let data = null;
+  dialog(`<h2>Add an edition</h2><p>Use a photo of your rig on a plain white background, straight from the side or the front.</p>
+    <label class="drop" id="drop"><input type="file" accept="image/*" hidden><span>Drop a photo here, or click to pick one</span></label>
+    <div style="margin-top:12px"><input type="text" id="edName" placeholder="Edition name, e.g. Desert"></div>`, async () => {
+      const name = $('#edName').value.trim();
+      if (!data) { toast('Pick a photo first.'); return false; }
+      if (!name) { toast('Give the edition a name.'); return false; }
+      const r = await api('/api/edition', { name, image: data });
+      if (!r.ok) { toast(r.error || 'That didn\'t work.'); return false; }
+      toast(`Processing “${name}”… it'll appear in the list in a few seconds.`);
+    }, 'Add edition');
+  const drop = $('#drop'), inp = drop.querySelector('input');
+  const take = file => {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => { data = rd.result; drop.innerHTML = `<img src="${data}" alt="">`; drop.append(inp);
+      if (!$('#edName').value) $('#edName').value = file.name.replace(/\.[^.]+$/, ''); };
+    rd.readAsDataURL(file);
+  };
+  inp.onchange = () => take(inp.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); take(e.dataTransfer.files[0]); };
+}
+
+// ------------------------------------------------------------- settings ---
+function renderSettings() {
+  rows($('#aboutRows'), [['Version', esc(S.version) + (S.frozen ? '' : ' (running from source)')], ['Data folder', `<span style="user-select:text">${esc(S.folder)}</span>`],
+    ['Overlay URL', `<span style="user-select:text">${esc(S.url)}</span>`], ['Bluetooth', S.bleak ? 'Ready' : 'Not installed']]);
+}
+
+// ------------------------------------------------------------- explorer ---
+$('#readBtn').onclick = () => act('read', { path: $('#pathIn').value });
+$('#pathIn').onkeydown = e => { if (e.key === 'Enter') $('#readBtn').click(); };
+$('#probeBtn').onclick = () => { act('probe'); toast('Trying every likely path - this takes a few seconds.'); };
+$('#clearLog').onclick = () => { act('clear_log'); logSeen = -2; };
+$('#copyLog').onclick = () => copy(S.log.map(l => l[1]).join('\n'), 'Copied - paste it into the chat.');
+function renderExplorer() {
+  const last = (S.log.length ? S.log[S.log.length - 1][0] : 0) + (S.link === 'connected' ? 0.5 : 0);
+  if (last === logSeen) return;
+  logSeen = last;
+  const el = $('#log'), atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.textContent = S.log.map(l => l[1]).join('\n') || (S.link === 'connected' ? 'Type a path and hit Read, or hit “Find battery data”.' : 'Connect to your rig first.');
+  if (atEnd) el.scrollTop = el.scrollHeight;
+}
+
+// ----------------------------------------------------------------- loop ---
+function renderAll() {
+  applyAccent();
+  renderSide();
+  if (page === 'dashboard') renderDash();
+  if (page === 'history') renderHistory();
+  if (page === 'overlay') renderOverlay();
+  if (page === 'settings') renderSettings();
+  if (page === 'explorer') renderExplorer();
+  syncFields();
+}
+async function poll() {
+  try {
+    const s = await api('/api/state');
+    // keep what the user is in the middle of changing
+    const now = Date.now();
+    if (S) for (const store of ['ov', 'cfg']) for (const k in s[store]) if (pending[store + k] > now) s[store][k] = S[store][k];
+    S = s;
+    if (S.status_t > lastStatusT) { if (lastStatusT && S.status) toast(S.status); lastStatusT = S.status_t; }
+    renderAll();
+  } catch (e) { /* app is closing or restarting */ }
+}
+(async () => {
+  SCH = await api('/api/schema');
+  S = await api('/api/state');
+  lastStatusT = S.status_t;
+  buildOverlay();
+  buildFields($('#appFields'), SCH.app_fields, 'cfg', SCH.app_defaults);
+  renderAll();
+  setInterval(poll, 700);
+})();
+</script>
+</body>
+</html>

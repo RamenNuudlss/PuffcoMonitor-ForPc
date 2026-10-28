@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rig Overlay</title>
+<!--
+  OBS overlay for Puffco Monitor. Add a Browser source pointing at
+  http://127.0.0.1:8765/overlay   (Puffco Monitor must be running)
+  Every setting in the app's Overlay tab can also be forced from the URL, e.g.
+    ?entrance=up&inhale=8&visibility=always&txt_active=Boofin
+  ?demo=1 loops through every state - handy for lining it up without the rig.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  #stage { position: relative; height: 100vh; max-width: 100vw; margin: 0 auto; --u: 1px; }
+  #stage > * { position: absolute; pointer-events: none; }
+  .fill { position: absolute; inset: 0; }
+  .masked { -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+  .screen { mix-blend-mode: screen; }
+  #rigImg { width: 100%; height: 100%; display: block;
+            filter: drop-shadow(0 calc(var(--u) * .5) calc(var(--u) * 1.6) rgba(0,0,0,.55)); }
+  #rigWrap, #reflect { transition: opacity .8s ease, filter .8s ease; }
+  #backlight, #floorGlow { border-radius: 50%; }
+  #show { left: 0; top: 0; width: 100%; height: 100%; opacity: 0; visibility: hidden; }
+  #show > * { position: absolute; }
+  #knob { position: absolute; display: none; will-change: transform; }
+  #lift { left: 0; top: 0; width: 100%; height: 100%; transition: transform .7s cubic-bezier(.2,.8,.2,1); }
+  #lift > * { position: absolute; }
+  #pad { transition: opacity .55s ease, transform .7s cubic-bezier(.2,.8,.2,1); opacity: 0; transform: translateY(18%); }
+  #pad.on { opacity: 1; transform: none; }
+  #padSvg { width: 100%; height: 100%; overflow: visible; display: block; }
+  #reflect img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform: scaleY(-1); }
+  #reflect { filter: blur(calc(var(--u) * .12)); }
+  #label {
+    left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: stretch;
+    padding: calc(var(--u) * .85) calc(var(--u) * 2) calc(var(--u) * .9);
+    border-radius: calc(var(--u) * 2.4);
+    background: linear-gradient(180deg, rgba(26,26,32,.82), rgba(10,10,14,.82));
+    border: 1px solid rgba(255,255,255,.08);
+    box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2) rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+    transition: opacity .45s ease;
+    font: 600 calc(var(--u) * 2.3) "Segoe UI", system-ui, sans-serif; color: #f1f1f5; letter-spacing: .02em;
+    white-space: nowrap; min-width: calc(var(--u) * 24);
+  }
+  #row { display: flex; align-items: center; gap: calc(var(--u) * 1); }
+  #dot { width: calc(var(--u) * 1.15); height: calc(var(--u) * 1.15); border-radius: 50%; flex: none; transition: background .4s, box-shadow .4s; }
+  #ltext { flex: 1; }
+  #temp { font-variant-numeric: tabular-nums; color: #fff; }
+  #bat { color: #9d9da8; font-weight: 500; font-size: .9em; margin-left: calc(var(--u) * 1.4); font-variant-numeric: tabular-nums; }
+  #bar { height: calc(var(--u) * .45); border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden;
+         margin-top: calc(var(--u) * .7); transition: opacity .4s; }
+  #barFill { height: 100%; width: 0; border-radius: 99px; transition: width .3s linear; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="show">
+  <div id="pad"><svg id="padSvg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="lift">
+  <div id="backlight"></div>
+  <div id="floorGlow"></div>
+  <div id="reflect"><img id="reflImg" alt=""></div>
+  <div id="rigWrap">
+    <img id="rigImg" alt="">
+    <div id="glassBloom" class="fill screen" style="opacity:0"><div id="glassBloomIn" class="fill masked"></div></div>
+    <div id="glassLight" class="fill masked screen" style="opacity:0"></div>
+    <div id="heatLight" class="fill masked screen" style="opacity:0"></div>
+    <div id="baseBloom" class="fill screen" style="opacity:0"><div id="baseBloomIn" class="fill masked"></div></div>
+    <div id="baseLight" class="fill masked screen" style="opacity:0"></div>
+    <img id="knob" alt="">
+  </div>
+  <canvas id="smoke"></canvas>
+  <canvas id="fx"></canvas>
+  </div>
+  </div>
+  <div id="label">
+    <div id="row"><span id="dot"></span><span id="ltext">Offline</span><span id="temp"></span><span id="bat"></span></div>
+    <div id="bar"><div id="barFill"></div></div>
+  </div>
+</div>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const DEMO = qs.has('demo');
+const HTTP = location.protocol.startsWith('http');
+const BASE = qs.get('server') || (HTTP ? '' : 'http://127.0.0.1:8765');
+const RIGS = (HTTP ? BASE : '') + (HTTP ? '/rigs/' : 'rigs/');
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pct = (v, of) => (100 * v / of) + '%';
+function opt(name, fallback) {
+  if (!qs.has(name)) return fallback;
+  const v = qs.get(name);
+  return v === '0' || v === 'false' ? false : v === '1' || v === 'true' ? true : v;
+}
+function hexRgb(c) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(c || '');
+  if (!m) return [1, 0.55, 0.6];
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+function hslRgb(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [f(0), f(8), f(4)];
+}
+const css = ([r, g, b], a = 1) => `rgba(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)},${a})`;
+
+const PHASE = {
+  off:      { text: 'txt_off',     dot: '#55555f' },
+  standby:  { text: 'txt_standby', dot: '#9a9aa6' },
+  heating:  { text: 'txt_heating', dot: '#f5a524' },
+  active:   { text: 'txt_active',  dot: '#ff6b3d' },
+  cooldown: { text: 'txt_cool',    dot: '#6fb3ff' },
+};
+
+// every setting and its default (the app sends its own values; the URL can override any of them)
+const DEF = {
+  edition: '', rig_scale: 1, offline_mode: 'dim', reflection: true, shadow: true, pad: true,
+  knob_anim: true, knob_amount: 1, bubbles: true,
+  smoke: 'session', inhale: 10, exhale: 4, wait: 1, first_delay: 0.5,
+  smoke_amount: 1, smoke_size: 1, smoke_speed: 1, smoke_swirl: 1, smoke_linger: 1,
+  quality: 'high', smoke_tint: true, cooldown_wisps: true, detect: false,
+  visibility: 'popup', linger: 8, stay_heating: true, stay_charging: false,
+  pop_heat: true, pop_session: true, pop_cool: true, pop_charge: true, pop_full: true, pop_connect: true,
+  entrance: 'left', anim_speed: 1, bounce: 0.4, lean: true, motion_blur: true,
+  label: true, bar_mode: 'always', bar_scale: 1, bar_gap: 0, bar_opacity: 0.82,
+  show_dot: true, show_temp: true, battery: true, show_progress: true,
+  txt_standby: 'Standby', txt_heating: 'Heating', txt_active: 'Boofin', txt_cool: 'Cooling down',
+  txt_charging: 'Charging', txt_charged: 'Charged', txt_off: 'Offline',
+  light: 'edition', light_intensity: 1, glass_glow: 1, rainbow_speed: 1,
+  standby_breathe: true, heat_fill: true, heater_glow: true, backlight: true, floor_glow: true,
+  units: 'F',
+};
+function S(k) {
+  if (k === 'entrance' && !qs.has('entrance') && qs.has('swoop')) return qs.get('swoop');
+  return opt(k, settings[k] !== undefined ? settings[k] : DEF[k]);
+}
+const N = k => { const v = Number(S(k)); return isFinite(v) ? v : DEF[k]; };
+const TXT = k => String(S(k) ?? '').trim() || DEF[k];
+const fmtTemp = f => S('units') === 'C' ? `${Math.round((f - 32) * 5 / 9)}°C` : `${Math.round(f)}°F`;
+
+// =============================================================== layout ===
+// Stage units are rig-photo pixels: room above for vapor, at the sides for drift,
+// below for the floor reflection and the status pill.
+let rig = null, L = null, glassMask = null;
+function layout() {
+  if (!rig) return;
+  const W0 = rig.width, H0 = rig.height, [bx0, , bx1, by1] = rig.base;
+  // the stage never changes shape; the rig is laid out at its chosen size, standing on the same floor line
+  const s = clamp(N('rig_scale') || 1, 0.4, 1.6);
+  const SW = 2 * W0, head0 = 0.55 * H0, SH = head0 + 1.3 * H0, floor = head0 + by1 * H0;
+  const W = W0 * s, H = H0 * s, padX = (SW - W) / 2, head = floor - by1 * H;
+  L = { W, H, padX, head, SW, SH, floor, s };
+  L.smokeH = Math.max(0.08 * H, head + rig.mouth[1] * H + 0.05 * H);
+  L.smokeH0 = head0 + rig.mouth[1] * H0 + 0.05 * H0;     // smoke area height at 100% size
+  $('stage').style.aspectRatio = `${L.SW} / ${L.SH}`;
+  const place = (el, x, y, w, h) => Object.assign($(el).style, { left: pct(x, L.SW), top: pct(y, L.SH), width: pct(w, L.SW), height: pct(h, L.SH) });
+  place('rigWrap', padX, head, W, H);
+  place('reflect', padX, L.floor - (1 - by1) * H, W, H);
+  const gx = padX + rig.glow[0] * W, gy = head + (rig.mouth[1] + rig.glow[1]) / 2 * H;
+  place('backlight', gx - 0.95 * W, gy - 0.62 * H, 1.9 * W, 1.24 * H);
+  const bw = (bx1 - bx0) * W;
+  place('floorGlow', padX + bx0 * W - 0.35 * bw, L.floor - 0.035 * H, 1.7 * bw, 0.075 * H);
+  place('smoke', 0, 0, L.SW, L.smokeH);
+  $('fx').style.cssText = 'left:0;top:0;width:100%;height:100%';
+  L.labelTop = L.floor + 0.12 * H + clamp(N('bar_gap'), -0.2, 0.6) * H0;
+  fitLabel();
+  // charging pad: the rig gets lifted onto it while it's on the charger
+  const pcx = padX + (bx0 + bx1) / 2 * W, pw = 1.45 * bw, pry = 0.024 * H, th = 0.042 * H, mg = 0.04 * H;
+  L.lift = th;
+  const topY = L.floor - th - 0.004 * H;
+  place('pad', pcx - pw / 2 - mg, topY - pry - mg, pw + 2 * mg, 2 * pry + th + 2 * mg);
+  buildPad(pw, pry, th, mg, H);
+  $('show').style.transformOrigin = `${(100 * pcx / L.SW).toFixed(2)}% ${(100 * L.floor / L.SH).toFixed(2)}%`;
+  const top = 1 - by1;                       // reflection fades out a short way below the floor line
+  const m = `linear-gradient(180deg, transparent ${top * 100}%, rgba(0,0,0,.32) ${top * 100}%, transparent ${(top + 0.2) * 100}%)`;
+  $('reflect').style.webkitMaskImage = $('reflect').style.maskImage = m;
+  resize();
+}
+const CHARGE = [0.31, 0.94, 0.63];
+function buildPad(pw, ry, th, mg, H) {
+  const vw = pw + 2 * mg, vh = 2 * ry + th + 2 * mg, cx = vw / 2, cy = mg + ry, rx = pw / 2;
+  const f = n => n.toFixed(2);
+  $('padSvg').setAttribute('viewBox', `0 0 ${f(vw)} ${f(vh)}`);
+  $('padSvg').innerHTML = `
+    <defs>
+      <linearGradient id="pSide" x1="0" x2="1">
+        <stop offset="0" stop-color="#0b0b0e"/><stop offset=".22" stop-color="#3a3b43"/>
+        <stop offset=".5" stop-color="#202127"/><stop offset=".82" stop-color="#111115"/><stop offset="1" stop-color="#08080a"/>
+      </linearGradient>
+      <radialGradient id="pTop" cx=".42" cy=".25" r=".95">
+        <stop offset="0" stop-color="#40414a"/><stop offset=".55" stop-color="#25262c"/><stop offset="1" stop-color="#121216"/>
+      </radialGradient>
+      <filter id="pBlur" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="${f(0.012 * H)}"/></filter>
+      <filter id="pGlow" x="-30%" y="-400%" width="160%" height="900%">
+        <feGaussianBlur stdDeviation="${f(0.0045 * H)}" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <ellipse id="pSpill" cx="${f(cx)}" cy="${f(cy + th + ry * 0.5)}" rx="${f(rx * 1.18)}" ry="${f(ry * 1.6)}" filter="url(#pBlur)" opacity="0"/>
+    <ellipse cx="${f(cx)}" cy="${f(cy + th + ry * 0.35)}" rx="${f(rx * 1.02)}" ry="${f(ry * 0.9)}" fill="#000" opacity=".6" filter="url(#pBlur)"/>
+    <path d="M${f(cx - rx)},${f(cy)} L${f(cx - rx)},${f(cy + th)} A${f(rx)},${f(ry)} 0 0 0 ${f(cx + rx)},${f(cy + th)} L${f(cx + rx)},${f(cy)} Z" fill="url(#pSide)"/>
+    <path d="M${f(cx - rx)},${f(cy + th)} A${f(rx)},${f(ry)} 0 0 0 ${f(cx + rx)},${f(cy + th)}" fill="none" stroke="#000" stroke-opacity=".6" stroke-width="${f(ry * 0.08)}"/>
+    <ellipse cx="${f(cx)}" cy="${f(cy)}" rx="${f(rx)}" ry="${f(ry)}" fill="url(#pTop)"/>
+    <ellipse cx="${f(cx)}" cy="${f(cy)}" rx="${f(rx - 0.6)}" ry="${f(ry - 0.4)}" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="${f(ry * 0.06)}"/>
+    <ellipse cx="${f(cx)}" cy="${f(cy)}" rx="${f(rx * 0.86)}" ry="${f(ry * 0.84)}" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="${f(ry * 0.2)}"/>
+    <ellipse id="pRing" cx="${f(cx)}" cy="${f(cy)}" rx="${f(rx * 0.86)}" ry="${f(ry * 0.84)}" pathLength="100" fill="none" stroke-width="${f(ry * 0.11)}" stroke-linecap="round" filter="url(#pGlow)"/>
+    <ellipse id="pSweep" cx="${f(cx)}" cy="${f(cy)}" rx="${f(rx * 0.86)}" ry="${f(ry * 0.84)}" pathLength="100" fill="none" stroke="#fff" stroke-width="${f(ry * 0.13)}" stroke-linecap="round" stroke-dasharray="7 93" filter="url(#pGlow)"/>
+    <rect id="pLed" x="${f(cx - pw * 0.035)}" y="${f(cy + ry + th * 0.42)}" width="${f(pw * 0.07)}" height="${f(th * 0.16)}" rx="${f(th * 0.08)}" filter="url(#pGlow)"/>`;
+}
+// keep the info bar inside the source however big it is or however far down it's pushed
+function fitLabel() {
+  if (!L) return;
+  const sh = $('stage').getBoundingClientRect().height;
+  if (!sh) return;
+  const lab = $('label'), w0 = lab.offsetWidth || 1;
+  const bs = Math.min(clamp(N('bar_scale') || 1, 0.3, 3), (window.innerWidth * 0.96) / w0);   // never wider than the source
+  lab.style.transform = `translateX(-50%) scale(${bs.toFixed(4)})`;
+  const h = lab.offsetHeight * bs, want = L.labelTop / L.SH * sh;
+  lab.style.top = (Math.max(0, Math.min(want, sh - h - 2)) / sh * 100).toFixed(3) + '%';
+}
+function resize() {
+  const r = $('stage').getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  $('stage').style.setProperty('--u', (r.height / 100) + 'px');
+  const fx = $('fx');
+  fx.width = Math.max(1, Math.round(r.width * dpr)); fx.height = Math.max(1, Math.round(r.height * dpr));
+  if (!L) return;
+  L.px = fx.width / L.SW;
+  L.u = r.height / 100;
+  const sc = $('smoke');
+  sc.width = fx.width; sc.height = Math.max(1, Math.round(L.smokeH * L.px));
+  const blur = r.height / 100;
+  $('glassBloom').style.filter = `blur(${blur * 1.6}px)`;
+  $('baseBloom').style.filter = `blur(${blur * 1.1}px)`;
+  $('backlight').style.filter = `blur(${blur * 3}px)`;
+  $('floorGlow').style.filter = `blur(${blur * 1.2}px)`;
+  setupSmoke();
+  fitLabel();
+}
+addEventListener('resize', resize);
+
+let loaded = null;
+async function loadEdition(name) {
+  if (!name || name === loaded) return;
+  loaded = name;
+  const dir = RIGS + encodeURIComponent(name) + '/';
+  try { rig = await (await fetch(dir + 'rig.json', { cache: 'no-store' })).json(); }
+  catch (e) { loaded = null; return; }
+  const v = '?v=' + Date.now();              // always pick up re-processed photos
+  $('rigImg').src = $('reflImg').src = dir + 'rig.png' + v;
+  const setMask = (id, f) => { $(id).style.webkitMaskImage = $(id).style.maskImage = `url("${dir}${f}${v}")`; };
+  const k = $('knob');
+  if (rig.knob) {
+    const [kx0, ky0, kx1, ky1] = rig.knob.box, [px, py] = rig.knob.pivot;
+    Object.assign(k.style, {
+      display: 'block', left: kx0 * 100 + '%', top: ky0 * 100 + '%',
+      width: (kx1 - kx0) * 100 + '%', height: (ky1 - ky0) * 100 + '%',
+      transformOrigin: `${(px - kx0) / (kx1 - kx0) * 100}% ${(py - ky0) / (ky1 - ky0) * 100}%`,
+    });
+    k.src = dir + 'knob.png' + v;
+  } else {
+    k.style.display = 'none';
+  }
+  setMask('glassLight', 'glass.png'); setMask('glassBloomIn', 'glass.png'); setMask('heatLight', 'glass.png');
+  setMask('baseLight', 'base.png'); setMask('baseBloomIn', 'base.png');
+  glassMask = new Image(); glassMask.src = dir + 'glass.png' + v;
+  applyLight();
+  layout();
+}
+
+// ============================================================= settings ===
+let settings = { ...DEF };
+let accent = [1, 0.55, 0.6], rainbow = false, settingsKey = '';
+function applyLight() {
+  const l = String(S('light') || 'edition');
+  rainbow = l === 'rainbow';
+  accent = hexRgb(l === 'edition' || rainbow ? (rig && rig.accent) : l);
+}
+async function applySettings() {
+  const lab = $('label').style;
+  lab.display = S('label') ? '' : 'none';
+  lab.transformOrigin = '50% 0';
+  lab.transform = `translateX(-50%) scale(${clamp(N('bar_scale') || 1, 0.3, 3)})`;
+  const a = clamp(N('bar_opacity'), 0, 1);
+  lab.background = `linear-gradient(180deg, rgba(26,26,32,${a}), rgba(10,10,14,${a}))`;
+  lab.borderColor = `rgba(255,255,255,${(0.1 * a).toFixed(3)})`;
+  lab.boxShadow = a > 0.02 ? `0 calc(var(--u) * .5) calc(var(--u) * 2) rgba(0,0,0,${(0.55 * a).toFixed(3)}), inset 0 1px 0 rgba(255,255,255,${(0.07 * a).toFixed(3)})` : 'none';
+  $('reflect').style.display = S('reflection') ? '' : 'none';
+  $('rigImg').style.filter = S('shadow') ? '' : 'none';
+  applyLight();
+  let ed = S('edition');
+  if (!ed) {
+    try { ed = (await (await fetch(RIGS, { cache: 'no-store' })).json())[0]; } catch (e) { ed = 'Daybreak (front)'; }
+  }
+  await loadEdition(ed);
+  if (rig) layout();
+  updateLabel();
+}
+
+// ========================================================= device state ===
+let st = { connected: false, phase: 'off', temp: null, target: null, battery: null, charging: false,
+           on_charger: false, charge_full: false, hit: false, hit_id: 0, puff_id: 0 };
+let phaseSince = performance.now(), lastPhase = 'off', lastHitId = null, fails = 0;
+let cycStart = 0, lastPuffId = null, manualPuff = false, drawSignal = false;
+function setState(j) {
+  if (j.settings) {
+    const k = JSON.stringify(j.settings);
+    if (k !== settingsKey) { settingsKey = k; Object.assign(settings, j.settings); applySettings(); }
+  }
+  Object.assign(st, j);
+  if (!st.connected) st.phase = 'off';
+  if (st.phase !== lastPhase) { lastPhase = st.phase; phaseSince = performance.now(); }
+  if (lastHitId === null) lastHitId = st.hit_id;
+  else if (st.hit_id !== lastHitId) {           // a detected draw (only used if that's switched on)
+    lastHitId = st.hit_id;
+    if (S('detect')) drawSignal = true;
+  }
+  if (lastPuffId === null) lastPuffId = st.puff_id;
+  else if (st.puff_id !== lastPuffId) { lastPuffId = st.puff_id; manualPuff = true; }
+  updateLabel();
+}
+function heatProgress() {
+  return clamp(((st.temp || 80) - 80) / ((st.target || 520) - 80), 0, 1);
+}
+function updateLabel() {
+  const p = PHASE[st.phase] || PHASE.off;
+  let txt = TXT(p.text);
+  if (st.phase === 'standby' && (st.charging || st.on_charger)) txt = TXT(st.charge_full ? 'txt_charged' : 'txt_charging');
+  $('ltext').textContent = txt;
+  $('temp').textContent = S('show_temp') && (st.phase === 'heating' || st.phase === 'active') && st.temp ? fmtTemp(st.temp) : '';
+  $('dot').style.display = S('show_dot') ? '' : 'none';
+  const dotCol = st.phase === 'standby' && (st.charging || st.on_charger) ? '#4ff0a0' : p.dot;
+  $('dot').style.background = dotCol;
+  $('dot').style.boxShadow = st.phase === 'off' ? 'none' : `0 0 calc(var(--u) * .9) ${dotCol}`;
+  const showBat = S('battery') && st.connected && st.battery != null;
+  $('bat').textContent = showBat ? `${st.charging ? '⚡' : ''}${Math.round(st.battery)}%` : '';
+  $('bar').style.display = S('show_progress') && st.phase === 'heating' ? '' : 'none';
+  $('barFill').style.width = (heatProgress() * 100).toFixed(1) + '%';
+  fitLabel();
+}
+async function poll() {
+  try {
+    const r = await fetch(BASE + '/state', { cache: 'no-store' });
+    setState(await r.json()); fails = 0;
+  } catch (e) {
+    if (++fails >= 3) setState({ connected: false, phase: 'off' });
+  }
+  setTimeout(poll, 200);
+}
+const DEMO_SEQ = [['charging', 5], ['standby', 3], ['heating', 7], ['active', 3], ['hit', 3.2], ['active', 3], ['hit', 3.2], ['cooldown', 5]];
+const DEMO_LEN = DEMO_SEQ.reduce((a, s) => a + s[1], 0);
+let demoHits = 0, demoPrev = '';
+function demoTick() {
+  const hold = qs.get('demo');
+  if (hold === 'charging') {
+    setState({ connected: true, phase: 'standby', temp: 78, battery: 64 + (performance.now() / 1000) % 30,
+               charging: true, on_charger: true, charge_full: false, hit: false, hit_id: demoHits });
+    return setTimeout(demoTick, 100);
+  }
+  if (hold && hold !== '1') {
+    const isHit = hold === 'hit', t = (performance.now() / 1000) % 7;
+    if (isHit && !demoHits) demoHits = 1;
+    setState({ connected: true, phase: isHit ? 'active' : hold, temp: hold === 'heating' ? 78 + (t / 7) * 442 : isHit ? 506 : 520,
+               target: 520, battery: 72, charging: false, hit: isHit, hit_id: demoHits });
+    return setTimeout(demoTick, 100);
+  }
+  let t = (performance.now() / 1000) % DEMO_LEN, i = 0;
+  while (t > DEMO_SEQ[i][1]) { t -= DEMO_SEQ[i][1]; i++; }
+  const [name, len] = DEMO_SEQ[i];
+  if (name === 'hit' && demoPrev !== 'hit') demoHits++;
+  demoPrev = name;
+  const chg = name === 'charging';
+  const temp = name === 'standby' || chg ? 78 : name === 'heating' ? 78 + (t / len) * 442
+             : name === 'hit' ? 506 : name === 'active' ? 520 : 520 - t * 22;
+  setState({ connected: true, phase: name === 'hit' ? 'active' : chg ? 'standby' : name, temp, target: 520,
+             battery: chg ? 66 + t : 72, charging: chg, on_charger: chg, charge_full: false,
+             hit: name === 'hit', hit_id: demoHits });
+  setTimeout(demoTick, 100);
+}
+
+// ======================================================== fluid vapor ===
+// A small GPU fluid solver (advection, vorticity confinement, pressure projection,
+// buoyancy) so the vapor rolls and curls like the real thing.
+const VS = `#version 300 es
+precision highp float;
+in vec2 aPos; uniform vec2 uTexel;
+out vec2 vUv; out vec2 vL; out vec2 vR; out vec2 vT; out vec2 vB;
+void main() {
+  vUv = aPos * 0.5 + 0.5;
+  vL = vUv - vec2(uTexel.x, 0.0); vR = vUv + vec2(uTexel.x, 0.0);
+  vT = vUv + vec2(0.0, uTexel.y); vB = vUv - vec2(0.0, uTexel.y);
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+const FH = `#version 300 es
+precision highp float; precision highp sampler2D;
+in vec2 vUv; in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB; out vec4 o;
+`;
+const FS = {
+  splat: FH + `uniform sampler2D uTarget; uniform float uAspect, uRadius, uMode; uniform vec2 uPoint; uniform vec3 uValue;
+    void main() {
+      vec2 p = vUv - uPoint; p.x *= uAspect;
+      float f = exp(-dot(p, p) / uRadius);
+      vec4 b = texture(uTarget, vUv);
+      vec3 r = uMode > 0.5 ? mix(b.xyz, uValue, clamp(f * 0.9, 0.0, 1.0)) : b.xyz + f * uValue;
+      o = vec4(r, 1.0);
+    }`,
+  advect: FH + `uniform sampler2D uVelocity, uSource; uniform vec2 uVelTexel; uniform float uDt, uDiss, uRise, uEdge;
+    void main() {
+      vec2 c = vUv - uDt * texture(uVelocity, vUv).xy * uVelTexel;
+      float inside = step(0.0, c.x) * step(c.x, 1.0) * step(0.0, c.y) * step(c.y, 1.0);
+      float edge = smoothstep(0.68, 1.0, vUv.y) + smoothstep(0.14, 0.0, vUv.x) + smoothstep(0.86, 1.0, vUv.x);
+      float diss = uDiss * (1.0 + uRise * vUv.y) + uEdge * edge;
+      o = inside * texture(uSource, c) / (1.0 + diss * uDt);
+    }`,
+  divergence: FH + `uniform sampler2D uVelocity;
+    void main() {
+      float L = texture(uVelocity, vL).x, R = texture(uVelocity, vR).x;
+      float T = texture(uVelocity, vT).y, B = texture(uVelocity, vB).y;
+      vec2 C = texture(uVelocity, vUv).xy;
+      if (vB.y < 0.0) B = -C.y;
+      o = vec4(0.5 * (R - L + T - B), 0.0, 0.0, 1.0);
+    }`,
+  curl: FH + `uniform sampler2D uVelocity;
+    void main() {
+      float L = texture(uVelocity, vL).y, R = texture(uVelocity, vR).y;
+      float T = texture(uVelocity, vT).x, B = texture(uVelocity, vB).x;
+      o = vec4(0.5 * (R - L - T + B), 0.0, 0.0, 1.0);
+    }`,
+  forces: FH + `uniform sampler2D uVelocity, uCurl, uDye; uniform float uCurlK, uDt, uBuoy;
+    void main() {
+      float L = texture(uCurl, vL).x, R = texture(uCurl, vR).x, T = texture(uCurl, vT).x, B = texture(uCurl, vB).x;
+      float C = texture(uCurl, vUv).x;
+      vec2 f = 0.5 * vec2(abs(T) - abs(B), abs(R) - abs(L));
+      f /= length(f) + 1e-4;
+      f *= uCurlK * C; f.y *= -1.0;
+      vec2 v = texture(uVelocity, vUv).xy + f * uDt;
+      v.y += uBuoy * texture(uDye, vUv).r * uDt;
+      o = vec4(clamp(v, -1000.0, 1000.0), 0.0, 1.0);
+    }`,
+  pressure: FH + `uniform sampler2D uPressure, uDivergence;
+    void main() {
+      float L = texture(uPressure, vL).x, R = texture(uPressure, vR).x;
+      float T = texture(uPressure, vT).x, B = texture(uPressure, vB).x;
+      if (vL.x < 0.0) L = 0.0; if (vR.x > 1.0) R = 0.0; if (vT.y > 1.0) T = 0.0;   // open top and sides
+      o = vec4((L + R + B + T - texture(uDivergence, vUv).x) * 0.25, 0.0, 0.0, 1.0);
+    }`,
+  gradient: FH + `uniform sampler2D uPressure, uVelocity;
+    void main() {
+      float L = texture(uPressure, vL).x, R = texture(uPressure, vR).x;
+      float T = texture(uPressure, vT).x, B = texture(uPressure, vB).x;
+      if (vL.x < 0.0) L = 0.0; if (vR.x > 1.0) R = 0.0; if (vT.y > 1.0) T = 0.0;
+      o = vec4(texture(uVelocity, vUv).xy - vec2(R - L, T - B), 0.0, 1.0);
+    }`,
+  scale: FH + `uniform sampler2D uTex; uniform float uValue; void main() { o = uValue * texture(uTex, vUv); }`,
+  display: FH + `uniform sampler2D uDye; uniform vec2 uDyeTexel, uMouth; uniform vec3 uAccent;
+    uniform float uAspect, uTint, uDensity;
+    void main() {
+      float d = texture(uDye, vUv).r;
+      vec2 e = uDyeTexel * 2.5;
+      float dx = texture(uDye, vUv + vec2(e.x, 0.0)).r - texture(uDye, vUv - vec2(e.x, 0.0)).r;
+      float dy = texture(uDye, vUv + vec2(0.0, e.y)).r - texture(uDye, vUv - vec2(0.0, e.y)).r;
+      vec3 n = normalize(vec3(-dx, -dy, 0.22));
+      float lit = clamp(dot(n, normalize(vec3(-0.45, 0.6, 0.66))), 0.0, 1.0);
+      float a = 1.0 - exp(-max(d, 0.0) * uDensity);
+      vec3 col = mix(vec3(0.76, 0.77, 0.81), vec3(1.0), 0.32 + 0.68 * lit);
+      col = mix(col, vec3(1.0), smoothstep(0.55, 1.0, a) * 0.45);
+      vec2 m = (vUv - uMouth) * vec2(uAspect, 1.0);
+      col = mix(col, uAccent * 0.35 + 0.65, clamp(exp(-dot(m, m) * 90.0) * uTint, 0.0, 1.0));
+      a *= smoothstep(1.0, 0.72, vUv.y) * smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
+      o = vec4(col * a, a);
+    }`,
+};
+
+let fluid = null;
+function createFluid(canvas, simW, simH, dyeW, dyeH) {
+  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
+  if (!gl || !gl.getExtension('EXT_color_buffer_float')) return null;
+  const compile = (type, src) => {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const vs = compile(gl.VERTEX_SHADER, VS);
+  const P = {};
+  for (const [name, src] of Object.entries(FS)) {
+    const p = gl.createProgram();
+    gl.attachShader(p, vs); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, src));
+    gl.bindAttribLocation(p, 0, 'aPos'); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {};
+    for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
+      const n = gl.getActiveUniform(p, i).name; u[n] = gl.getUniformLocation(p, n);
+    }
+    P[name] = { p, u };
+  }
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  function target(w, h) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+                          [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('fbo');
+    gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    return { tex, fb, w, h, texel: [1 / w, 1 / h],
+             bind(i) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, tex); return i; } };
+  }
+  function double(w, h) {
+    let a = target(w, h), b = target(w, h);
+    return { get read() { return a; }, get write() { return b; }, swap() { [a, b] = [b, a]; }, texel: a.texel };
+  }
+  const vel = double(simW, simH), dye = double(dyeW, dyeH), prs = double(simW, simH);
+  const div = target(simW, simH), curl = target(simW, simH);
+  const aspect = simW / simH;
+
+  function run(name, texel, out, set) {
+    const pr = P[name]; gl.useProgram(pr.p);
+    gl.uniform2fv(pr.u.uTexel, texel);
+    set(pr.u);
+    if (out) { gl.bindFramebuffer(gl.FRAMEBUFFER, out.fb); gl.viewport(0, 0, out.w, out.h); }
+    else { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height); }
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  return {
+    splat(field, x, y, value, radius, mode) {
+      const f = field === 'vel' ? vel : dye;
+      run('splat', f.texel, f.write, u => {
+        gl.uniform1i(u.uTarget, f.read.bind(0)); gl.uniform1f(u.uAspect, aspect);
+        gl.uniform2f(u.uPoint, x, y); gl.uniform3fv(u.uValue, value);
+        gl.uniform1f(u.uRadius, radius); gl.uniform1f(u.uMode, mode);
+      });
+      f.swap();
+    },
+    step(dt, cfg) {
+      run('curl', vel.texel, curl, u => gl.uniform1i(u.uVelocity, vel.read.bind(0)));
+      run('forces', vel.texel, vel.write, u => {
+        gl.uniform1i(u.uVelocity, vel.read.bind(0)); gl.uniform1i(u.uCurl, curl.bind(1));
+        gl.uniform1i(u.uDye, dye.read.bind(2)); gl.uniform1f(u.uCurlK, cfg.curl);
+        gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uBuoy, cfg.buoy);
+      }); vel.swap();
+      run('divergence', vel.texel, div, u => gl.uniform1i(u.uVelocity, vel.read.bind(0)));
+      run('scale', prs.texel, prs.write, u => { gl.uniform1i(u.uTex, prs.read.bind(0)); gl.uniform1f(u.uValue, 0.8); }); prs.swap();
+      for (let i = 0; i < (cfg.iters || 22); i++) {
+        run('pressure', prs.texel, prs.write, u => { gl.uniform1i(u.uPressure, prs.read.bind(0)); gl.uniform1i(u.uDivergence, div.bind(1)); });
+        prs.swap();
+      }
+      run('gradient', vel.texel, vel.write, u => { gl.uniform1i(u.uPressure, prs.read.bind(0)); gl.uniform1i(u.uVelocity, vel.read.bind(1)); }); vel.swap();
+      run('advect', vel.texel, vel.write, u => {
+        gl.uniform1i(u.uVelocity, vel.read.bind(0)); gl.uniform1i(u.uSource, vel.read.bind(0));
+        gl.uniform2fv(u.uVelTexel, vel.texel); gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uDiss, cfg.velDiss);
+        gl.uniform1f(u.uRise, 0.0); gl.uniform1f(u.uEdge, 1.5);
+      }); vel.swap();
+      run('advect', dye.texel, dye.write, u => {
+        gl.uniform1i(u.uVelocity, vel.read.bind(0)); gl.uniform1i(u.uSource, dye.read.bind(1));
+        gl.uniform2fv(u.uVelTexel, vel.texel); gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uDiss, cfg.dyeDiss);
+        gl.uniform1f(u.uRise, 1.8); gl.uniform1f(u.uEdge, 3.5);
+      }); dye.swap();
+    },
+    draw(mouth, col, tint) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      run('display', dye.texel, null, u => {
+        gl.uniform1i(u.uDye, dye.read.bind(0)); gl.uniform2fv(u.uDyeTexel, dye.texel);
+        gl.uniform2fv(u.uMouth, mouth); gl.uniform3fv(u.uAccent, col);
+        gl.uniform1f(u.uAspect, aspect); gl.uniform1f(u.uTint, tint); gl.uniform1f(u.uDensity, 3.0);
+      });
+    },
+  };
+}
+const QUALITY = { high: { sim: 144, dye: 0.85, iters: 22, min: 432 }, medium: { sim: 112, dye: 0.6, iters: 16, min: 320 },
+                  low: { sim: 80, dye: 0.4, iters: 10, min: 256 } };
+const quality = () => QUALITY[S('quality')] || QUALITY.high;
+function setupSmoke() {
+  const c = $('smoke'), Q = quality();
+  // motion is solved on a fixed grid (keeps the look identical at any size); the vapor
+  // detail texture follows the source resolution so it stays crisp when the source is big
+  const simW = Q.sim, simH = Math.max(32, Math.round(simW * c.height / Math.max(1, c.width)));
+  const dyeW = Math.round(clamp(c.width * Q.dye, Q.min, 1600) / 16) * 16;
+  const dyeH = Math.max(96, Math.round(dyeW * c.height / Math.max(1, c.width)));
+  const key = `${simW}x${simH}/${dyeW}x${dyeH}`;
+  if (fluid && fluid.key === key) return;
+  try { fluid = createFluid(c, simW, simH, dyeW, dyeH); if (fluid) fluid.key = key; }
+  catch (e) { console.warn('fluid vapor unavailable, using particles:', e.message); fluid = null; }
+}
+
+// fallback particles (only if the GPU solver can't start) + bubbles in the glass
+function makeSprite(seed) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  let s = seed * 9301 + 49297;
+  const r = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  for (let i = 0; i < 22; i++) {
+    const a = r() * Math.PI * 2, d = r() * 26, rad = 16 + r() * 30;
+    const x = 64 + Math.cos(a) * d, y = 64 + Math.sin(a) * d;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, 'rgba(255,255,255,.16)'); gr.addColorStop(0.5, 'rgba(240,240,246,.07)'); gr.addColorStop(1, 'rgba(235,235,242,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+  }
+  return c;
+}
+let sprites = null;
+const particles = [], bubbles = [];
+const carry = { wisp: 0, plume: 0, bub: 0 };
+const off = document.createElement('canvas'), offCtx = off.getContext('2d');
+function emitFallback(kind, rate, dt) {
+  sprites = sprites || [1, 2, 3, 4, 5].map(makeSprite);
+  carry[kind] += rate * dt;
+  const K = L.H / 350;
+  while (carry[kind] >= 1 && particles.length < 700) {
+    carry[kind]--;
+    const big = kind === 'plume';
+    particles.push({
+      x: L.padX + rig.mouth[0] * L.W + rnd(-3, 3) * K, y: L.head + rig.mouth[1] * L.H,
+      spr: sprites[(Math.random() * 5) | 0], rot: rnd(0, 6.28), spin: rnd(-0.6, 0.6), seed: rnd(0, 20),
+      vx: (big ? rnd(-14, 14) : rnd(-3, 3)) * K, vy: -(big ? rnd(58, 92) : rnd(20, 34)) * K,
+      r: (big ? rnd(5, 9) : rnd(3, 5)) * K, grow: (big ? rnd(16, 26) : rnd(6, 10)) * K,
+      drag: rnd(0.6, 1.2), lift: rnd(5, 12) * K, curl: (big ? rnd(8, 18) : rnd(10, 18)) * K,
+      a0: big ? rnd(0.5, 0.85) : rnd(0.35, 0.6), life: big ? rnd(2.8, 4.2) : rnd(2.4, 3.4), age: 0,
+    });
+  }
+}
+function emitBubbles(rate, dt) {
+  carry.bub += rate * dt;
+  const K = L.H / 350, [x0, y0, x1, y1] = rig.bubbles;
+  while (carry.bub >= 1) {
+    carry.bub--;
+    bubbles.push({ x: rnd(x0, x1) * L.W, y: y1 * L.H - rnd(0, 10) * K, r: rnd(0.8, 2.6) * K,
+                   vy: -rnd(45, 85) * K, top: y0 * L.H, seed: rnd(0, 9) });
+  }
+}
+
+// ============================================================ animation ===
+let last = performance.now(), simAcc = 0, jetPhase = 0;
+let knobAng = 0, knobPhase = 0, showUntil = 0, sessUntil = 0, lastPhaseKey = null, lastPadKey = null;
+let popP = null, popV = 0;                  // entrance animation: 0 = on screen, 1 = gone
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!L) return;
+  const T = now / 1000, ph = st.phase, since = (now - phaseSince) / 1000;
+  const smokeMode = S('smoke');
+  // ---- session rhythm: smoke (inhale), pause (exhale), wait, repeat - all adjustable ----
+  const IN = Math.max(0.5, N('inhale')), EX = Math.max(0, N('exhale')), REST = Math.max(0, N('wait'));
+  const CYCLE = IN + EX + REST;
+  let stage = 'none', sT = 0;
+  if (ph === 'active' && smokeMode !== 'off') {
+    if (!cycStart) cycStart = now + 1000 * Math.max(0, N('first_delay'));
+    if (manualPuff) { cycStart = now; manualPuff = false; }
+    const ct0 = (now - cycStart) / 1000, m0 = ct0 < 0 ? -1 : ct0 % CYCLE;
+    if (drawSignal) { if (m0 < 0 || m0 >= IN) cycStart = now; drawSignal = false; }
+    const ct = (now - cycStart) / 1000;
+    if (smokeMode === 'constant') { stage = 'inhale'; sT = 1; }
+    else if (ct >= 0) {
+      const m = ct % CYCLE;
+      stage = m < IN ? 'inhale' : m < IN + EX ? 'exhale' : 'rest';
+      sT = m < IN ? m : m < IN + EX ? m - IN : m - IN - EX;
+    } else stage = 'rest';
+  } else { cycStart = 0; manualPuff = drawSignal = false; }
+  const inhaling = stage === 'inhale', hitting = inhaling;      // the cloud comes out during the inhale
+  const ramp = !hitting ? 0 : smokeMode === 'constant' ? 1 : Math.min(1, sT / 0.35) * Math.min(1, (IN - sT) / 0.5);
+  const col = rainbow ? hslRgb((T * 40 * N('rainbow_speed')) % 360, 0.95, 0.62) : accent;
+  const c = css(col), c0 = css(col, 0);
+
+  // ---- lighting ----
+  let base = 0.05, glass = 0, heat = 0, back = 0, prog = heatProgress();
+  const breathe = S('standby_breathe');
+  if (ph === 'standby') {
+    base = breathe ? 0.32 + 0.3 * (0.5 + 0.5 * Math.sin(T * Math.PI / 2)) : 0.47; back = base * 0.12;
+  } else if (ph === 'heating') {
+    base = 0.75 + 0.25 * Math.sin(T * 4.5); glass = 0.25 + 0.55 * prog; heat = 0.2 + 0.5 * prog; back = 0.1 + 0.25 * prog;
+  } else if (ph === 'active') {
+    const flick = 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 23);
+    base = 1;
+    glass = inhaling ? 0.95 + flick : hitting ? 0.82 : 0.72;
+    heat = inhaling ? 0.92 : hitting ? 0.7 : 0.55;
+    back = inhaling ? 0.5 + flick : hitting ? 0.42 : 0.33;
+  } else if (ph === 'cooldown') {
+    const k = Math.exp(-since / 2.4); base = 0.25 + 0.75 * k; glass = 0.7 * k; heat = 0.5 * k; back = 0.3 * k;
+  }
+  if (ph === 'standby' && st.charging) base = breathe ? 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(T * 2)) : 0.42;
+  const LI = Math.max(0, N('light_intensity'));
+  glass *= Math.max(0, N('glass_glow'));
+  if (!S('heater_glow')) heat = 0;
+  if (!S('backlight')) back = 0;
+  const [gx, gy] = rig.glow;
+  const glassGrad = `radial-gradient(ellipse 80% 62% at ${gx * 100}% ${gy * 100}%, ${c} 0%, ${css(col, .55)} 35%, ${c0} 100%)`;
+  $('glassLight').style.background = glassGrad;
+  $('glassLight').style.opacity = glass.toFixed(3);
+  $('glassBloomIn').style.background = glassGrad;
+  $('glassBloom').style.opacity = Math.min(1, glass * 0.75).toFixed(3);
+  $('heatLight').style.background = `radial-gradient(ellipse 50% 20% at ${gx * 100}% ${gy * 100}%, #ffd08a 0%, #ff8a3a 40%, rgba(255,90,30,0) 100%)`;
+  $('heatLight').style.opacity = heat.toFixed(3);
+  const clip = ph === 'heating' && S('heat_fill') ? `inset(0 ${(50 * (1 - prog)).toFixed(1)}% 0 ${(50 * (1 - prog)).toFixed(1)}%)` : 'none';
+  for (const id of ['baseLight', 'baseBloomIn']) { $(id).style.background = c; $(id).style.clipPath = clip; }
+  $('baseLight').style.opacity = Math.min(1, base * LI).toFixed(3);
+  $('baseBloom').style.opacity = Math.min(1, base * 0.9 * LI).toFixed(3);
+  $('floorGlow').style.background = `radial-gradient(closest-side, ${css(col, .9)}, ${css(col, .35)} 45%, ${c0})`;
+  $('floorGlow').style.opacity = S('floor_glow') ? Math.min(1, base * 0.6 * LI * (ph === 'heating' ? 0.35 + 0.65 * prog : 1)).toFixed(3) : '0';
+  $('backlight').style.background = `radial-gradient(closest-side, ${css(col, .55)}, ${css(col, .18)} 50%, ${c0})`;
+  $('backlight').style.opacity = back.toFixed(3);
+  const charging = st.connected && (st.on_charger || st.charging);
+  const onPad = charging && S('pad');
+  $('pad').classList.toggle('on', onPad);
+  $('lift').style.transform = onPad ? `translateY(${(-100 * L.lift / L.SH).toFixed(3)}%)` : 'none';
+  if (onPad) {
+    const cc = css(CHARGE), full = st.charge_full || (st.battery || 0) >= 99.5;
+    const ring = $('pRing'), sweep = $('pSweep'), led = $('pLed');
+    ring.setAttribute('stroke', cc);
+    ring.setAttribute('stroke-dasharray', `${clamp(st.battery || 0, 2, 100).toFixed(1)} 100`);
+    ring.setAttribute('opacity', full ? '0.95' : (0.75 + 0.2 * Math.sin(T * 2.2)).toFixed(3));
+    sweep.setAttribute('stroke-dashoffset', (-(T * 28) % 100).toFixed(2));
+    sweep.setAttribute('opacity', full ? '0' : '0.85');
+    led.setAttribute('fill', cc);
+    led.setAttribute('opacity', full ? '0.95' : (0.45 + 0.5 * (0.5 + 0.5 * Math.sin(T * 3))).toFixed(3));
+    $('pSpill').setAttribute('fill', cc);
+    $('pSpill').setAttribute('opacity', full ? '0.28' : (0.22 + 0.12 * Math.sin(T * 2.2)).toFixed(3));
+  }
+  // ---- when the rig is on screen ----
+  const vis = S('visibility'), linger = 1000 * Math.max(0, N('linger'));
+  const phaseKey = st.connected ? ph : 'off', padKey = charging ? (st.charge_full ? 'full' : 'pad') : '';
+  if (lastPhaseKey === null) { lastPhaseKey = phaseKey; lastPadKey = padKey; showUntil = now + linger; }
+  if (phaseKey !== lastPhaseKey) {
+    const from = lastPhaseKey, to = phaseKey;
+    lastPhaseKey = to;
+    const trig = from === 'off' || to === 'off' ? 'pop_connect' : to === 'heating' ? 'pop_heat'
+               : to === 'active' ? 'pop_session' : to === 'cooldown' || from === 'active' || from === 'cooldown' ? 'pop_cool' : null;
+    if (trig && S(trig)) showUntil = now + linger;
+  }
+  if (padKey !== lastPadKey) {
+    lastPadKey = padKey;
+    if (S(padKey === 'full' ? 'pop_full' : 'pop_charge')) showUntil = now + linger;
+  }
+  const busy = ph === 'heating' || ph === 'active';
+  if (busy) sessUntil = now + linger;
+  if (vis === 'popup') {
+    if (busy && S('stay_heating')) showUntil = Math.max(showUntil, now + linger);
+    if (charging && S('stay_charging')) showUntil = Math.max(showUntil, now + linger);
+  }
+  let shown = vis === 'always' ? true : vis === 'never' ? false : vis === 'session' ? now < sessUntil : now < showUntil;
+  if (!st.connected && S('offline_mode') === 'hide') shown = false;
+
+  // ---- entrance / exit: a spring with adjustable speed and bounce ----
+  const ent = String(S('entrance')), tgt = shown ? 0 : 1;
+  if (popP === null) popP = 1;
+  if (ent === 'none') { popP = tgt; popV = 0; }
+  else {
+    const spd = clamp(N('anim_speed'), 0.1, 5), bounce = clamp(N('bounce'), 0, 1);
+    for (let k = 0, n = Math.max(1, Math.ceil(dt * 240)); k < n; k++) {
+      const h = dt / n, w = (shown ? 5.6 : 4.8) * spd, z = shown ? Math.max(0.3, 1 - 0.5 * bounce) : 1.0;
+      popV += (w * w * (tgt - popP) - 2 * z * w * popV) * h;
+      popP += popV * h;
+    }
+    if (Math.abs(tgt - popP) < 0.0003 && Math.abs(popV) < 0.0003) { popP = tgt; popV = 0; }
+  }
+  const f = clamp(popP, 0, 1);
+  let tx = 0, ty = 0, rot = 0, scl = 1, op = 1, vel = 0;
+  if (ent === 'left' || ent === 'right') {                 // glide in along a gentle arc, leaning into it
+    const D = ent === 'right' ? 72 : -72;
+    tx = D * popP; ty = -3.2 * Math.sin(Math.PI * f); vel = popV * D;
+    op = 1 - clamp((f - 0.6) / 0.4, 0, 1);
+    if (S('lean')) rot = clamp(vel * 0.085, -11, 11);
+  } else if (ent === 'up' || ent === 'down') {
+    const D = ent === 'up' ? 60 : -60;
+    ty = D * popP; vel = popV * D; op = 1 - clamp((f - 0.55) / 0.45, 0, 1);
+  } else if (ent === 'zoom') {
+    scl = Math.max(0.05, 1 - 0.5 * popP); op = 1 - clamp((f - 0.25) / 0.75, 0, 1);
+  } else if (ent === 'fade') {
+    op = 1 - f;
+  } else op = f < 0.5 ? 1 : 0;
+  const sh = $('show').style;
+  sh.visibility = f < 0.995 ? 'visible' : 'hidden';
+  sh.opacity = op.toFixed(3);
+  sh.transform = `translate(${tx.toFixed(3)}%, ${ty.toFixed(3)}%) rotate(${rot.toFixed(3)}deg) scale(${scl.toFixed(4)})`;
+  const mb = S('motion_blur') ? Math.min(0.32, Math.abs(vel) * 0.0024) : 0;
+  sh.filter = mb > 0.03 ? `blur(${(mb * L.u).toFixed(2)}px)` : 'none';
+  $('label').style.opacity = S('bar_mode') === 'with_rig' ? (f < 0.995 ? op : 0).toFixed(3) : '1';
+
+  // ---- the carb-cap knob rocks back and forth during a session ----
+  if (rig.knob) {
+    const amp = ph === 'active' && S('knob_anim') ? (inhaling ? 15 : 11) * Math.max(0, N('knob_amount')) : 0;
+    knobPhase += dt * (inhaling ? 4.4 : 3.1);
+    const target = amp * (Math.sin(knobPhase) + 0.18 * Math.sin(knobPhase * 2.3 + 1.1));
+    knobAng += (target - knobAng) * Math.min(1, dt * 9);
+    $('knob').style.transform = `rotate(${knobAng.toFixed(2)}deg)`;
+  }
+
+  const dim = ph === 'off' && S('offline_mode') === 'dim';
+  $('rigWrap').style.opacity = dim ? 0.55 : 1;
+  $('reflect').style.opacity = onPad ? 0 : dim ? 0.55 : 1;
+  $('rigWrap').style.filter = dim ? 'saturate(.55) brightness(.85)' : 'none';
+
+  // ---- vapor ----
+  const mouthUv = [(L.padX + rig.mouth[0] * L.W) / L.SW, 1 - (L.head + rig.mouth[1] * L.H) / L.smokeH];
+  if (fluid) {
+    simAcc += dt;
+    const STEP = 1 / 60;
+    let n = 0;
+    while (simAcc >= STEP && n < 3) {
+      simAcc -= STEP; n++; jetPhase += STEP;
+      const [mx, my] = mouthUv, t = jetPhase;
+      const sv = L.s, q = L.s * L.smokeH0 / L.smokeH, q2 = q * q;   // keep the vapor in proportion to the rig
+      const sz = Math.max(0.2, N('smoke_size')), sz2 = sz * sz, spd = Math.max(0.1, N('smoke_speed'));
+      if (hitting) {
+        const ang = 0.22 * Math.sin(t * 2.7) + 0.12 * Math.sin(t * 6.1 + 1.3) + rnd(-0.08, 0.08);
+        const V = (115 + 30 * Math.sin(t * 8.3)) * ramp * sv * spd;
+        fluid.splat('vel', mx, my + 0.012 * q, [V * Math.sin(ang), V * Math.cos(ang), 0], 0.0008 * q2 * sz2, 1);
+        fluid.splat('dye', mx, my + 0.008 * q, [0.85 * ramp * Math.max(0, N('smoke_amount')), 0, 0], 0.0007 * q2 * sz2, 0);
+        if (Math.random() < 0.18) fluid.splat('vel', mx + rnd(-0.05, 0.05) * sv * sz, my + rnd(0.06, 0.2) * q,
+                                              [rnd(-60, 60) * sv * spd, rnd(-10, 25) * sv * spd, 0], 0.0015 * q2 * sz2, 0);
+      } else if (ph === 'cooldown' && since < 4 && S('cooldown_wisps')) {
+        const k = ph === 'cooldown' ? 1 - since / 4 : 1;
+        const ang = 0.35 * Math.sin(t * 1.3) + 0.2 * Math.sin(t * 3.7);
+        fluid.splat('vel', mx, my + 0.008 * q, [20 * Math.sin(ang) * sv, 26 * sv, 0], 0.00018 * q2, 1);
+        fluid.splat('dye', mx, my + 0.005 * q, [0.09 * k, 0, 0], 0.00016 * q2, 0);
+      }
+      fluid.step(STEP, { curl: 30 * Math.max(0, N('smoke_swirl')), buoy: 30 * sv * spd, velDiss: 0.22,
+                         dyeDiss: 0.3 / Math.max(0.1, N('smoke_linger')), iters: quality().iters });
+    }
+    fluid.draw(mouthUv, col, S('smoke_tint') ? glass * 0.3 : 0);
+  } else {
+    if (hitting) emitFallback('plume', 60 * ramp, dt);
+    if (ph === 'cooldown' && since < 4 && S('cooldown_wisps')) emitFallback('wisp', 6 * (1 - since / 4), dt);
+  }
+  if (S('bubbles') && (inhaling || (ph === 'active' && smokeMode === 'constant'))) emitBubbles(32 * Math.min(1, sT / 0.25 + 0.2), dt);
+
+
+  const fx = $('fx'), ctx = fx.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, fx.width, fx.height);
+  ctx.setTransform(L.px, 0, 0, L.px, 0, 0);
+  if (bubbles.length && glassMask && glassMask.complete && glassMask.naturalWidth) {
+    const sc = Math.min(3, L.px);
+    off.width = Math.ceil(L.W * sc); off.height = Math.ceil(L.H * sc);
+    offCtx.setTransform(sc, 0, 0, sc, 0, 0);
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.y += b.vy * dt; b.x += Math.sin(T * 14 + b.seed) * 0.5;
+      if (b.y < b.top) { bubbles.splice(i, 1); continue; }
+      offCtx.beginPath(); offCtx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      offCtx.fillStyle = 'rgba(255,255,255,.22)'; offCtx.fill();
+      offCtx.strokeStyle = 'rgba(255,255,255,.85)'; offCtx.lineWidth = 0.7 * (L.H / 350); offCtx.stroke();
+    }
+    offCtx.setTransform(1, 0, 0, 1, 0, 0);
+    offCtx.globalCompositeOperation = 'destination-in';
+    offCtx.drawImage(glassMask, 0, 0, off.width, off.height);
+    offCtx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(off, L.padX, L.head, L.W, L.H);
+  }
+  if (particles.length) {
+    const wind = (Math.sin(T * 0.23) * 5 + Math.sin(T * 0.61) * 3) * (L.H / 350);
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age += dt;
+      if (p.age >= p.life || p.y < -p.r * 2) { particles.splice(i, 1); continue; }
+      const k = p.age / p.life;
+      p.vy = p.vy * (1 - p.drag * dt) - p.lift * dt;
+      p.vx += (Math.sin(p.age * 1.9 + p.seed) * p.curl + wind * 0.6) * dt; p.vx *= 1 - 0.4 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.grow * (1 - 0.55 * k) * dt; p.rot += p.spin * dt;
+      const a = p.a0 * Math.min(1, p.age / 0.12) * Math.pow(1 - k, 1.5) * clamp((p.y + p.r * 0.2) / (0.23 * L.H), 0, 1);
+      if (a < 0.003) continue;
+      ctx.globalAlpha = a; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.drawImage(p.spr, -p.r * 1.6, -p.r * 1.6, p.r * 3.2, p.r * 3.2); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+applySettings();
+DEMO ? demoTick() : poll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

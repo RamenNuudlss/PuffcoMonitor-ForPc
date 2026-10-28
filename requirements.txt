@@ -1,0 +1,5 @@
+bleak>=3.0
+pywebview>=6.0
+pystray>=0.19
+pillow>=10.0
+numpy>=1.26

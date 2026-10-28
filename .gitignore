@@ -1,0 +1,17 @@
+# Your own data - history, settings, logs (never commit these)
+puffco_data.json
+puffco_monitor.log*
+selftest.txt
+
+# Builds
+*.exe
+build/
+dist/
+__pycache__/
+*.pyc
+
+# Editions you add yourself stay local; only the bundled defaults are tracked
+/rigs/*
+!/rigs/Daybreak (front)/
+!/rigs/Daybreak (side)/
+/rigs/_upload_*
