@@ -102,14 +102,14 @@ nav button.on svg { color: var(--accent); }
 .btn.icon { width: 36px; padding: 0; }
 .btn:disabled { opacity: .45; pointer-events: none; }
 .btn.grow { flex: 1; }
-select, input[type=text] {
+select, input[type=text], input[type=number] {
   height: 36px; width: 100%; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-hi);
   background: rgba(0,0,0,.25); outline: none; transition: border-color .2s, box-shadow .2s;
 }
 select { appearance: none; padding-right: 32px; cursor: pointer;
   background: rgba(0,0,0,.25) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238d8d9a' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center; }
 select option { background: #17171d; }
-select:focus, input[type=text]:focus { border-color: rgba(var(--accent-rgb), .7); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .15); }
+select:focus, input[type=text]:focus, input[type=number]:focus { border-color: rgba(var(--accent-rgb), .7); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .15); }
 input[type=text] { user-select: text; }
 .switch { position: relative; width: 42px; height: 24px; flex: none; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -276,6 +276,21 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .btnrow { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
 .pagefoot { display: flex; justify-content: flex-end; margin-top: 14px; }
 
+/* heat profiles */
+.slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+@media (max-width: 1180px) { .slots { grid-template-columns: repeat(2, 1fr); } }
+.slot { display: flex; flex-direction: column; }
+.slot.cur { border-color: rgba(var(--accent-rgb), .55); box-shadow: 0 10px 30px rgba(0,0,0,.25), 0 0 0 1px rgba(var(--accent-rgb), .25); }
+.slot h3 { min-height: 21px; }
+.slot .pname { font: 600 18px/1.25 var(--font-d); margin: 2px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot .ptemp { font: 300 34px/1.1 var(--font-d); font-variant-numeric: tabular-nums; }
+.slot .rows { flex: 1; }
+.slot .acts, .libacts { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.libacts { margin-top: 0; justify-content: flex-end; }
+.pform { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pform label { display: grid; gap: 6px; color: var(--dim); font-size: 12.5px; }
+.pform .wide { grid-column: span 2; }
+
 /* explorer */
 pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; border-radius: 12px; background: rgba(0,0,0,.35);
   border: 1px solid var(--line); font: 12.5px/1.55 Consolas, "Cascadia Mono", monospace; color: #c8c8d4; user-select: text; white-space: pre-wrap; }
@@ -323,6 +338,7 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
   <symbol id="i-bat" viewBox="0 0 24 24"><rect x="3" y="7.5" width="16" height="9" rx="2.5"/><path d="M21 10.5v3"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-tray" viewBox="0 0 24 24"><path d="M4 14.5l2.4-8.2A2 2 0 0 1 8.3 5h7.4a2 2 0 0 1 1.9 1.3l2.4 8.2"/><path d="M4 14.5h4.5l1.2 2.5h4.6l1.2-2.5H20v3.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-prof" viewBox="0 0 24 24"><path d="M5 20V9M5 5V4M12 20v-5M12 11V4M19 20v-9M19 7V4"/><circle cx="5" cy="7" r="2"/><circle cx="12" cy="13" r="2"/><circle cx="19" cy="9" r="2"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
 </svg>
 
@@ -331,6 +347,7 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
   <div class="devchip" id="devchip"><span class="dot"></span><div style="min-width:0"><div class="n" id="devName">No rig</div><div class="s" id="devState">Not connected</div></div><div class="bat num" id="devBat"></div></div>
   <nav id="nav">
     <button data-go="dashboard" class="on"><svg class="i"><use href="#i-dash"/></svg>Dashboard</button>
+    <button data-go="profiles"><svg class="i"><use href="#i-prof"/></svg>Heat profiles</button>
     <button data-go="history"><svg class="i"><use href="#i-hist"/></svg>History</button>
     <button data-go="overlay"><svg class="i"><use href="#i-ov"/></svg>OBS overlay</button>
     <button data-go="settings"><svg class="i"><use href="#i-set"/></svg>Settings</button>
@@ -401,6 +418,21 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
         <h3><svg class="i"><use href="#i-chip"/></svg>Device</h3>
         <div class="rows" id="devRows" style="margin-top:4px"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= heat profiles -->
+  <section data-page="profiles">
+    <div class="card" style="margin-bottom:16px">
+      <h3><svg class="i"><use href="#i-prof"/></svg>On your rig <span class="muted" id="profNote" style="text-transform:none;letter-spacing:0;font-weight:500"></span>
+        <span style="flex:1"></span><button class="btn sm ghost" id="profRefresh" style="text-transform:none;letter-spacing:0">Reload from rig</button></h3>
+      <div class="hint" style="margin:0">The Peak Pro always has 4 heat profiles. Editing one writes it straight to the rig. Colors aren't changed here, so use the Puffco app for those.</div>
+    </div>
+    <div class="slots" id="slots"></div>
+    <div class="card">
+      <h3><svg class="i"><use href="#i-tray"/></svg>Saved on this PC
+        <span style="flex:1"></span><button class="btn sm" id="libAdd" style="text-transform:none;letter-spacing:0"><svg class="i"><use href="#i-plus"/></svg>Add profile</button></h3>
+      <div class="tablewrap"><table id="libTbl"></table></div>
     </div>
   </section>
 
@@ -500,7 +532,7 @@ const rows = (el, list) => { el.innerHTML = list.map(([a, b]) => `<div><span>${e
 const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 
 // ------------------------------------------------------------------- nav ---
-const TITLES = { dashboard: ['Dashboard', ''], history: ['History', 'Every charge and session the app has seen'],
+const TITLES = { dashboard: ['Dashboard', ''], profiles: ['Heat profiles', 'See, edit and save your heat profiles'], history: ['History', 'Every charge and session the app has seen'],
   overlay: ['OBS overlay', 'Your rig on stream - everything here is live'], settings: ['Settings', 'How Puffco Monitor behaves'],
   explorer: ['Explorer', 'Raw values straight from the rig'] };
 function go(p) {
@@ -696,6 +728,121 @@ function renderHistory() {
     (S.sessions.map(s => `<tr><td>${esc(fmtDate(s.time))}</td><td>${fmtDur(s.duration)}</td><td>${fmtT(s.peak_f)}</td>
       <td>${s.battery_used != null ? n0(s.battery_used, 1) + '%' : '—'}</td></tr>`).join('')
     || '<tr><td colspan="4" class="empty">No sessions yet.</td></tr>');
+}
+
+// -------------------------------------------------------- heat profiles ---
+const VAPOR = [[0, 'Smooth'], [0.5, 'Bold'], [1, 'Intense'], [1.5, 'Extreme']];
+const LIM = { temp_f: [400, 620], time: [5, 180], boost_temp: [0, 36], boost_time: [0, 60] };
+const vaporName = v => (VAPOR.find(x => x[0] === v) || [, '—'])[1];
+// temperatures travel in °F; the form shows them in the chosen units (boost is a step, so no 32° offset)
+const toUnit = (f, step) => units() === 'C' ? Math.round(step ? f * 5 / 9 : (f - 32) * 5 / 9) : Math.round(f);
+const fromUnit = (x, step) => units() === 'C' ? (step ? x * 9 / 5 : x * 9 / 5 + 32) : x;
+const fmtStep = f => units() === 'C' ? `+${toUnit(f, true)}°C` : `+${Math.round(f)}°F`;
+const fmtBoost = p => p.boost_temp == null && p.boost_time == null ? '—' : !p.boost_temp && !p.boost_time ? 'Off' :
+  `${fmtStep(p.boost_temp || 0)} · +${Math.round(p.boost_time || 0)} s`;
+const profConn = () => S.link === 'connected';
+const profBusy = () => profConn() && [7, 8, 9].includes(S.live.state);
+function profRows(p) {
+  const r = [['Time', p.time != null ? `${Math.round(p.time)} s` : '—']];
+  if (p.vapor != null) r.push(['Vapor', vaporName(p.vapor)]);
+  if (p.boost_temp != null || p.boost_time != null) r.push(['Boost', fmtBoost(p)]);
+  return r.map(([a, b]) => `<div><span>${esc(a)}</span><span>${esc(b)}</span></div>`).join('');
+}
+// one form for both a rig slot and a saved profile; `has` says which optional fields to show
+function profileForm(title, p, has, okText, onSave, extra = '') {
+  const u = units() === 'C' ? '°C' : '°F', lim = k => LIM[k].map(x => k === 'temp_f' ? toUnit(x) : k === 'boost_temp' ? toUnit(x, true) : x);
+  const num = (k, label, v) => `<label>${label} <input type="number" id="pf_${k}" min="${lim(k)[0]}" max="${lim(k)[1]}" value="${v ?? ''}"></label>`;
+  dialog(`<h2>${esc(title)}</h2>${extra}<div class="pform">
+      <label class="wide">Name <input type="text" id="pf_name" maxlength="20" spellcheck="false" value="${esc(p.name || '')}"></label>
+      ${num('temp_f', `Temperature (${u})`, p.temp_f != null ? toUnit(p.temp_f) : '')}
+      ${num('time', 'Time (seconds)', p.time != null ? Math.round(p.time) : '')}
+      ${has.vapor ? `<label class="wide">Vapor <select id="pf_vapor">${VAPOR.map(([v, n]) => `<option value="${v}" ${v === (p.vapor ?? 0.5) ? 'selected' : ''}>${n}</option>`).join('')}</select></label>` : ''}
+      ${has.boost ? num('boost_temp', `Boost (${u} added)`, toUnit(p.boost_temp || 0, true)) + num('boost_time', 'Boost (seconds added)', Math.round(p.boost_time || 0)) : ''}
+    </div>`, async () => {
+      const out = { name: $('#pf_name').value.trim() };
+      if (!out.name) { toast('Give the profile a name.'); return false; }
+      for (const k of ['temp_f', 'time', 'boost_temp', 'boost_time']) {
+        const el = $('#pf_' + k);
+        if (!el) continue;
+        const x = parseFloat(el.value), [lo, hi] = lim(k);
+        if (!(x >= lo && x <= hi)) { toast(`${el.parentElement.firstChild.textContent.trim()} has to be between ${lo} and ${hi}.`); return false; }
+        const f = Math.round((k === 'temp_f' || k === 'boost_temp' ? fromUnit(x, k === 'boost_temp') : x) * 10) / 10;
+        out[k] = Math.min(LIM[k][1], Math.max(LIM[k][0], f));   // °C limits are rounded, so keep the °F value in range
+      }
+      if ($('#pf_vapor')) out.vapor = +$('#pf_vapor').value;
+      return onSave(out);
+    }, okText);
+  setTimeout(() => $('#pf_name').focus(), 50);
+}
+async function profSend(a, extra) {
+  const r = await api('/api/do', { a, ...extra });
+  if (!r.ok) { toast(r.error || 'That didn\'t work.'); return false; }
+  poll();
+}
+const slotHas = slot => { const p = S.profiles.find(x => x.slot === slot) || {}; return { vapor: p.vapor != null, boost: p.boost_temp != null || p.boost_time != null }; };
+function editSlot(slot, from) {
+  if (!profConn()) return toast('Connect to your rig first.');
+  if (profBusy()) return toast('Wait until the rig finishes heating, then edit.');
+  const cur = S.profiles.find(x => x.slot === slot) || { slot };
+  const p = from ? { ...cur, ...from } : cur;
+  profileForm(`Edit slot ${slot + 1}`, p, slotHas(slot), 'Save to rig', out => {
+    toast(`Writing slot ${slot + 1} to the rig…`);
+    return profSend('save_profile', { slot, profile: out });
+  }, from ? `<p>This replaces “${esc(cur.name || 'slot ' + (slot + 1))}” on the rig.</p>` : '');
+}
+function editLib(i) {
+  const p = i == null ? { name: '', temp_f: 500, time: 30, vapor: 0.5, boost_temp: 0, boost_time: 0 } : S.library[i];
+  profileForm(i == null ? 'Add a profile' : 'Edit profile', p, { vapor: true, boost: true }, i == null ? 'Add' : 'Save',
+    out => profSend('lib_save', { index: i, profile: out }));
+}
+function loadLib(i) {
+  if (!profConn()) return toast('Connect to your rig first.');
+  if (profBusy()) return toast('Wait until the rig finishes heating, then load it.');
+  if (!S.profiles.length) return toast('Still reading the profiles from the rig - try again in a moment.');
+  const p = S.library[i];
+  dialog(`<h2>Put “${esc(p.name)}” on the rig</h2><p>Pick the slot it replaces. You can check everything before it's written.</p>
+    <select id="pickSlot">${S.profiles.map(x => `<option value="${x.slot}">Slot ${x.slot + 1} · ${esc(x.name)}</option>`).join('')}</select>`, () => {
+      const slot = +$('#pickSlot').value;
+      setTimeout(() => editSlot(slot, p), 0);
+    }, 'Next');
+}
+$('#libAdd').onclick = () => editLib(null);
+$('#profRefresh').onclick = () => { if (!profConn()) return toast('Connect to your rig first.'); act('refresh_profiles'); toast('Reading the profiles from the rig…'); };
+let profKey = '';
+function renderProfiles() {
+  const conn = profConn(), busy = profBusy(), sel = S.live.profile_slot;
+  const key = JSON.stringify([S.profiles, S.library, conn, busy, sel, units()]);
+  if (key === profKey) return;
+  profKey = key;
+  $('#profNote').textContent = !conn ? '· connect to see them' : busy ? '· editing unlocks after this heat cycle' : '';
+  $('#profRefresh').disabled = !conn;
+  $('#slots').innerHTML = (conn && S.profiles.length ? S.profiles : []).map(p => `<div class="card slot ${p.slot === sel ? 'cur' : ''}">
+      <h3>Slot ${p.slot + 1}${p.slot === sel ? ' <span class="chip">selected</span>' : ''}</h3>
+      <div class="pname" title="${esc(p.name)}">${esc(p.name)}</div>
+      <div class="ptemp">${p.temp_f != null ? fmtT(p.temp_f) : '—'}</div>
+      <div class="rows">${profRows(p)}</div>
+      <div class="acts"><button class="btn sm grow" data-edit="${p.slot}" ${busy ? 'disabled' : ''}>Edit</button>
+        <button class="btn sm" data-keep="${p.slot}" title="Save a copy on this PC">Save copy</button></div>
+    </div>`).join('') || `<div class="card empty" style="grid-column:1/-1">${conn ? 'Reading profiles from the rig…' : 'Connect to your rig to see its heat profiles.'}</div>`;
+  $$('#slots [data-edit]').forEach(b => b.onclick = () => editSlot(+b.dataset.edit));
+  $$('#slots [data-keep]').forEach(b => b.onclick = () => {
+    const { slot, ...p } = S.profiles.find(x => x.slot === +b.dataset.keep);
+    profSend('lib_save', { profile: p }).then(r => r !== false && toast(`Saved a copy of “${p.name}”.`));
+  });
+  $('#libTbl').innerHTML = '<tr><th>Name</th><th>Temp</th><th>Time</th><th>Vapor</th><th>Boost</th><th></th></tr>' +
+    (S.library.map((p, i) => `<tr><td>${esc(p.name)}</td><td>${fmtT(p.temp_f)}</td><td>${Math.round(p.time)} s</td>
+      <td>${p.vapor != null ? vaporName(p.vapor) : '—'}</td>
+      <td>${fmtBoost(p)}</td>
+      <td><div class="libacts"><button class="btn sm" data-load="${i}" ${!conn || busy ? 'disabled' : ''}>Put on rig</button>
+        <button class="btn sm ghost" data-ledit="${i}">Edit</button><button class="btn sm ghost" data-del="${i}">Remove</button></div></td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty">Nothing saved yet. Add a profile, or save a copy of one from your rig.</td></tr>');
+  $$('#libTbl [data-load]').forEach(b => b.onclick = () => loadLib(+b.dataset.load));
+  $$('#libTbl [data-ledit]').forEach(b => b.onclick = () => editLib(+b.dataset.ledit));
+  $$('#libTbl [data-del]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.del;
+    dialog(`<h2>Remove “${esc(S.library[i].name)}”?</h2><p>It's deleted from this PC. Profiles on the rig aren't touched.</p>`,
+      () => profSend('lib_remove', { index: i }), 'Remove', true);
+  });
 }
 
 // ------------------------------------------------------- settings forms ---
@@ -900,6 +1047,7 @@ function renderAll() {
   applyAccent();
   renderSide();
   if (page === 'dashboard') renderDash();
+  if (page === 'profiles') renderProfiles();
   if (page === 'history') renderHistory();
   if (page === 'overlay') renderOverlay();
   if (page === 'settings') renderSettings();
