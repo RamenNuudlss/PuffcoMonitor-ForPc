@@ -277,14 +277,15 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .pagefoot { display: flex; justify-content: flex-end; margin-top: 14px; }
 
 /* heat curve */
-.curve { position: relative; height: 196px; margin-top: 4px; }
+.herocurve { margin-top: 8px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.045); }
+.curve { position: relative; height: 150px; margin-top: 6px; }
 .curve svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .curve .grid line { stroke: rgba(255,255,255,.06); }
 .curve text { fill: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .curve .tgt { stroke: var(--dim); stroke-dasharray: 4 5; }
 .curve .ln { fill: none; stroke: url(#curveGrad); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(255,122,69,.35)); }
 .curve .dot { fill: #fff; filter: drop-shadow(0 0 6px var(--accent)); }
-.curve .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; }
+.curve .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; font-size: 12.5px; }
 
 /* heat profiles */
 .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
@@ -405,6 +406,10 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
             </div>
             <div class="herorows"><div class="rows" id="heroRows"></div></div>
           </div>
+          <div class="herocurve">
+            <div class="side-label">Heat curve <span id="curveNote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></div>
+            <div class="curve" id="curve"></div>
+          </div>
         </div>
       </div>
       <div class="card span-4">
@@ -412,10 +417,6 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
         <div class="big" id="batBig">—</div>
         <div class="capsule" id="capsule"><div class="fill" id="capFill" style="width:0"></div><div class="bolt"><svg class="i"><use href="#i-bolt"/></svg></div></div>
         <div class="rows" id="batRows"></div>
-      </div>
-      <div class="card span-12">
-        <h3><svg class="i"><use href="#i-flame"/></svg>Heat curve <span class="muted" id="curveNote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h3>
-        <div class="curve" id="curve"></div>
       </div>
       <div class="card span-4">
         <h3><svg class="i"><use href="#i-count"/></svg>Lifetime</h3>
