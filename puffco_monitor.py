@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-VERSION = "2.0"
+VERSION = "2.1"
 FROZEN = getattr(sys, "frozen", False)
 RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))          # files bundled with the app
 HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent   # your data
