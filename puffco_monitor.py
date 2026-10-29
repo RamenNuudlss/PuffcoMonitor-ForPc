@@ -1096,6 +1096,9 @@ class Core:
         self._save_timer = None
         self._accent_cache = (None, None)
         ensure_default_rigs()
+        eds = list_editions()
+        if eds and self.ov.get("edition") not in eds:     # fresh install or a deleted edition: show a real rig
+            self.ov["edition"] = "Daybreak (side)" if "Daybreak (side)" in eds else eds[0]
         self.server = OverlayServer(self)
         self.worker = Worker(self.q) if BleakClient is not None else None
         threading.Thread(target=self._pump, daemon=True).start()
