@@ -130,7 +130,7 @@ input[type=range]::-webkit-slider-thumb {
 input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), .3), 0 2px 8px rgba(0,0,0,.5); }
 
 /* ----------------------------------------------------------------- main --- */
-main { position: relative; z-index: 1; overflow-y: auto; overflow-x: hidden; padding: 26px 30px 40px; }
+main { position: relative; z-index: 1; overflow-y: auto; overflow-x: hidden; padding: 26px 30px 40px; container: main / inline-size; }
 .top { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .top h1 { margin: 0; font: 600 25px/1.2 var(--font-d); letter-spacing: -.01em; }
 .top .sub { color: var(--dim); font-size: 13px; margin-top: 2px; }
@@ -161,19 +161,20 @@ section[data-page].on { display: block; }
 .muted { color: var(--faint); }
 .span-8 { grid-column: span 8; } .span-7 { grid-column: span 7; } .span-6 { grid-column: span 6; }
 .span-5 { grid-column: span 5; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; } .span-12 { grid-column: span 12; }
-@media (max-width: 1180px) {
+@container main (max-width: 870px) {
   .span-8, .span-7, .span-6, .span-5, .span-4, .span-3 { grid-column: span 6; }
   .hero, .wide-sm { grid-column: span 12 !important; }
 }
 
 /* hero */
-.hero { display: grid; grid-template-columns: 230px 1fr; gap: 10px; min-height: 330px; padding: 0; }
-.rigbox { position: relative; display: grid; place-items: end center; padding-bottom: 20px; overflow: hidden; }
+.hero { display: grid; grid-template-columns: minmax(200px, 34%) 1fr; gap: 10px; min-height: 330px; padding: 0; }
+/* the rig fills its column: as tall as the card allows, unless the column is too narrow for that */
+.rigbox { position: relative; display: grid; place-items: end center; padding-bottom: 20px; overflow: hidden; container-type: size; }
 .rigbox::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 50% at 50% 78%, var(--glow, rgba(var(--accent-rgb), .25)), transparent 70%); transition: background 1s; }
-.rigwrap { position: relative; height: 340px; aspect-ratio: var(--rig-ar, .44); margin-top: 10px; filter: drop-shadow(0 18px 24px rgba(0,0,0,.55)); }
+.rigwrap { position: relative; height: min(calc(100cqh - 44px), calc((100cqw - 32px) / var(--rig-ar, .44))); aspect-ratio: var(--rig-ar, .44); filter: drop-shadow(0 18px 24px rgba(0,0,0,.55)); }
 .rigwrap img { position: absolute; display: block; }
 .rigwrap .main { inset: 0; width: 100%; height: 100%; }
-.rigbox .floor { position: absolute; bottom: 14px; left: 50%; width: 150px; height: 18px; transform: translateX(-50%);
+.rigbox .floor { position: absolute; bottom: 14px; left: 50%; width: min(190px, 75%); height: 18px; transform: translateX(-50%);
   border-radius: 50%; background: radial-gradient(closest-side, var(--floor, rgba(var(--accent-rgb), .55)), transparent); filter: blur(4px); transition: background 1s; }
 .heroinfo { padding: 22px 24px 20px 6px; display: flex; flex-direction: column; }
 .heroinfo .state { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
@@ -289,7 +290,7 @@ tr:hover td { background: rgba(255,255,255,.025); }
 
 /* heat profiles */
 .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
-@media (max-width: 1180px) { .slots { grid-template-columns: repeat(2, 1fr); } }
+@container main (max-width: 870px) { .slots { grid-template-columns: repeat(2, 1fr); } }
 .slot { display: flex; flex-direction: column; }
 .slot.cur { border-color: rgba(var(--accent-rgb), .55); box-shadow: 0 10px 30px rgba(0,0,0,.25), 0 0 0 1px rgba(var(--accent-rgb), .25); }
 .slot h3 { min-height: 21px; }
@@ -518,6 +519,16 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let S = null, SCH = null, page = 'dashboard', lastStatusT = 0, logSeen = -1;
 const pending = {};        // settings the user just changed: don't let a slow poll snap them back
+
+// ------------------------------------------------------------ window size ---
+// Scale the whole UI with the window so the dashboard fits without scrolling. It's laid out
+// for about 1300 x 1060; below 70% text gets too small, so very small windows scroll instead.
+function fit() {
+  const z = Math.max(0.7, Math.min(1.35, innerWidth / 1300, innerHeight / 1060));
+  document.documentElement.style.zoom = z.toFixed(3);
+}
+addEventListener('resize', fit);
+fit();
 
 // ---------------------------------------------------------------- server ---
 async function api(path, body) {
