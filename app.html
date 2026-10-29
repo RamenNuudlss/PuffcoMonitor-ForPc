@@ -276,6 +276,16 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .btnrow { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
 .pagefoot { display: flex; justify-content: flex-end; margin-top: 14px; }
 
+/* heat curve */
+.curve { position: relative; height: 196px; margin-top: 4px; }
+.curve svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.curve .grid line { stroke: rgba(255,255,255,.06); }
+.curve text { fill: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.curve .tgt { stroke: var(--dim); stroke-dasharray: 4 5; }
+.curve .ln { fill: none; stroke: url(#curveGrad); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(255,122,69,.35)); }
+.curve .dot { fill: #fff; filter: drop-shadow(0 0 6px var(--accent)); }
+.curve .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; }
+
 /* heat profiles */
 .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
 @media (max-width: 1180px) { .slots { grid-template-columns: repeat(2, 1fr); } }
@@ -320,6 +330,12 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
   <defs>
     <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="var(--g1, #ffb35c)"/><stop offset="1" stop-color="var(--g2, #ff6a8a)"/>
+    </linearGradient>
+    <linearGradient id="curveGrad" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7b8cff"/><stop offset=".55" stop-color="#ffb35c"/><stop offset="1" stop-color="#ff6a8a"/>
+    </linearGradient>
+    <linearGradient id="curveFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7a45" stop-opacity=".22"/><stop offset="1" stop-color="#ff7a45" stop-opacity="0"/>
     </linearGradient>
   </defs>
   <symbol id="i-dash" viewBox="0 0 24 24"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4.5-5"/><circle cx="12" cy="16" r="1.4"/></symbol>
@@ -417,6 +433,10 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
       <div class="card span-4">
         <h3><svg class="i"><use href="#i-chip"/></svg>Device</h3>
         <div class="rows" id="devRows" style="margin-top:4px"></div>
+      </div>
+      <div class="card span-12">
+        <h3><svg class="i"><use href="#i-flame"/></svg>Heat curve <span class="muted" id="curveNote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h3>
+        <div class="curve" id="curve"></div>
       </div>
     </div>
   </section>
@@ -702,7 +722,42 @@ function renderDash() {
     ['Uptime', L.uptime ? n0(L.uptime / 86400) + ' days' : '—'], ['Charges logged', n0(S.charges.length)],
     ['Tracked cycles', H.tracked != null ? n0(H.tracked, 1) : '—'],
     ['Second counter', L.dabs2 != null ? n0(L.dabs2) + ' dabs' : '—']]);
+  renderCurve();
   $('#subtitle').textContent = conn ? `${st.model || 'Puffco'} · ${st.name || ''}` : S.status || '';
+}
+
+// ----------------------------------------------------------- heat curve ---
+let curveKey = '';
+function renderCurve() {
+  const C = S.curve, box = $('#curve');
+  const key = JSON.stringify([C && C.start, C && C.points.length, C && C.target, C && C.live, units(), box.clientWidth]);
+  if (key === curveKey) return;
+  curveKey = key;
+  if (!C || C.points.length < 2) {
+    $('#curveNote').textContent = '';
+    box.innerHTML = `<div class="empty">${C && C.live ? 'Recording…' : 'Your next heat cycle shows up here.'}</div>`;
+    return;
+  }
+  $('#curveNote').textContent = C.live ? '· live' : `· last session, ${fmtDate(C.start)}`;
+  const W = box.clientWidth, H = box.clientHeight, L = 40, R = 12, T = 10, B = 22;
+  const pts = C.points, tmax = Math.max(30, pts[pts.length - 1][0]);
+  const peak = Math.max(...pts.map(p => p[1]), C.target || 0);
+  const lo = Math.min(70, ...pts.map(p => p[1])), hi = Math.ceil((peak + 30) / 50) * 50;
+  const x = t => L + t / tmax * (W - L - R), y = f => T + (1 - (f - lo) / (hi - lo)) * (H - T - B);
+  const line = pts.map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+  const yt = [], step = (hi - lo) > 400 ? 100 : 50;
+  for (let f = Math.ceil(lo / step) * step; f <= hi; f += step) yt.push(f);
+  const xs = tmax > 240 ? 60 : tmax > 90 ? 30 : 15, xt = [];
+  for (let t = 0; t <= tmax; t += xs) xt.push(t);
+  const last = pts[pts.length - 1];
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    <g class="grid">${yt.map(f => `<line x1="${L}" x2="${W - R}" y1="${y(f)}" y2="${y(f)}"/><text x="${L - 6}" y="${y(f) + 3.5}" text-anchor="end">${fmtT(f)}</text>`).join('')}</g>
+    ${xt.map(t => `<text x="${x(t)}" y="${H - 5}" text-anchor="middle">${t < 60 ? t + 's' : Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0')}</text>`).join('')}
+    ${C.target ? `<line class="tgt" x1="${L}" x2="${W - R}" y1="${y(C.target)}" y2="${y(C.target)}"/><text x="${W - R}" y="${y(C.target) - 5}" text-anchor="end">target ${fmtT(C.target)}</text>` : ''}
+    <polygon points="${x(pts[0][0])},${y(lo)} ${line} ${x(last[0])},${y(lo)}" fill="url(#curveFill)"/>
+    <polyline class="ln" points="${line}"/>
+    ${C.live ? `<circle class="dot" cx="${x(last[0])}" cy="${y(last[1])}" r="4"/>` : ''}
+  </svg>`;
 }
 
 // -------------------------------------------------------------- history ---

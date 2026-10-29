@@ -430,18 +430,26 @@ class SessionTracker:
         self.data = data
         self.cur = None
         self.last_cool = None
+        self.curve = None      # heat curve of the current or last cycle: start, target and [seconds, °F] points
 
-    def update(self, state, temp, pct):
+    def update(self, state, temp, pct, target=None):
         now = time.time()
         hot = (state in HEATING) or (temp is not None and temp >= self.HOT_F)
         ev = None
         if hot and self.cur is None:
             self.cur = {"start": now, "peak": temp or 0,
                         "bat_start": pct if pct is not None else None}
+            self.curve = {"start": now, "target": target, "points": []}
         elif hot and self.cur is not None:
             if temp:
                 self.cur["peak"] = max(self.cur["peak"], temp)
-        elif not hot and self.cur is not None:
+        if hot and temp:
+            pts, t = self.curve["points"], round(now - self.curve["start"], 1)
+            if not pts or t - pts[-1][0] >= 0.5:
+                pts.append([t, round(temp, 1)])
+            if target:
+                self.curve["target"] = target
+        if not hot and self.cur is not None:
             c = self.cur
             self.cur = None
             dur = now - c["start"]
@@ -1154,7 +1162,7 @@ class Core:
             if ev in ("started", "full", "unplugged"):
                 self.low_warned = False
         self.phase.update(L.get("state"), v.get("temp"))
-        self.sessions.update(L.get("state"), v.get("temp"), L.get("battery"))
+        self.sessions.update(L.get("state"), v.get("temp"), L.get("battery"), L.get("target"))
         ready = L.get("state") == 8 and (L.get("temp") or 0) >= 300
         if ready and not self.was_ready:
             self.alert("Puffco is ready", "Heat-up finished - time to dab.", "ready")
@@ -1288,6 +1296,8 @@ class Core:
                            "charge": CHARGE.get(L.get("charge")) if L.get("charge") is not None else None,
                            "source": CHARGE_SRC.get(L.get("charge_src")) if L.get("charge_src") is not None else None},
                 "charging": ch, "avg_full": avg, "avg_full_n": n,
+                "curve": dict(self.sessions.curve, points=list(self.sessions.curve["points"]),
+                              live=self.sessions.cur is not None) if self.sessions.curve else None,
                 "heating_for": now - self.sessions.cur["start"] if self.sessions.cur else None,
                 "today": self.sessions.today(),
                 "avg_session": sum(s["duration"] for s in recent) / len(recent) if recent else None,
