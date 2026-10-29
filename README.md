@@ -15,6 +15,8 @@
 
 **The app**
 - **Live dashboard:** chamber temperature, target temp, heat profile, how long it's been heating, and the current state.
+- **Heat curve:** a live chart of the chamber temperature through each heat cycle, against the target. The last one stays up until the next.
+- **Heat profiles:** see the 4 profiles on your rig and edit their name, temperature, time, vapor level and boost. Keep a library of your own profiles on your PC to add, remove and put on the rig whenever you want.
 - **Battery:** charge level, charger type (USB, Qi wireless or Power Dock), how long it's been charging, when it'll be full, your average full-charge time and roughly how many dabs are left.
 - **Battery health:** estimated capacity, charge cycles, dabs per charge, voltage, battery temperature and current.
 - **History:** every charge and session it sees, plus lifetime dabs and a 14-day chart.
@@ -89,7 +91,7 @@ Everything stays on your PC, in the same folder as the app:
 
 | File | What's in it |
 |---|---|
-| `puffco_data.json` | Your rig's name and Bluetooth address, charge and session history, and all settings |
+| `puffco_data.json` | Your rig's name and Bluetooth address, charge and session history, saved heat profiles, and all settings |
 | `puffco_monitor.log` | Errors, for troubleshooting |
 | `rigs/` | Overlay editions |
 
@@ -97,7 +99,7 @@ The app only talks to your rig and to `127.0.0.1`. The overlay server listens on
 
 ## How it works
 
-The Peak Pro speaks Puffco's BLE protocol. The app unlocks a session with the rig's seed/key handshake and then only sends **read** commands, so it never changes settings on the device. The UI is a local web page (`app.html`) shown in a native window, and the overlay (`overlay.html`) is a WebGL page that OBS loads from the same local server.
+The Peak Pro speaks Puffco's BLE protocol. The app unlocks a session with the rig's seed/key handshake and then only sends **read** commands, except when you save a heat profile. Saving writes that one profile slot (name, temperature, time, vapor and boost) and nothing else. Colors and every other setting are never changed. Editing is locked while the rig is heating. The UI is a local web page (`app.html`) shown in a native window, and the overlay (`overlay.html`) is a WebGL page that OBS loads from the same local server.
 
 ## Disclaimer
 

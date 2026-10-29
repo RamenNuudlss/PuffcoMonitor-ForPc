@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-VERSION = "2.0"
+VERSION = "2.1"
 FROZEN = getattr(sys, "frozen", False)
 RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))          # files bundled with the app
 HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent   # your data
@@ -60,7 +60,7 @@ LORAX_CMD = "60133d5c-5727-4f2c-9697-d842c5292a3c"
 LORAX_REPLY = "8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c"
 LORAX_VERSION = "05434bca-cc7f-4ef6-bbb3-b1c520b9800c"
 LORAX_KEY = bytes.fromhex("64c6456256f26f5b1ca12737a5dd71fb")
-OP_GET_SEED, OP_UNLOCK, OP_READ_SHORT = 0x00, 0x01, 0x10
+OP_GET_SEED, OP_UNLOCK, OP_READ_SHORT, OP_WRITE_SHORT = 0x00, 0x01, 0x10, 0x11
 NAME_HINTS = ("puffco", "peak", "proxy")
 
 STATES = {
@@ -78,6 +78,13 @@ MODELS = {0: "Peak Pro (OG)", 1: "Peak Pro Opal", 2: "Peak Pro Indiglow",
           4: "Peak Pro Guardian", 12: "Peak Pro Pearl", 13: "Peak Pro Onyx",
           15: "Peak Pro Desert", 17: "Peak Pro Flourish", 19: "Peak Pro Storm",
           23: "Peak Pro Daybreak"}
+
+# Heat profiles: the rig always has exactly 4 slots, each under /u/app/hc/<slot>/.
+# Temperatures are stored in Celsius except the boost, which is a Fahrenheit step.
+PROFILE_SLOTS = 4
+PROFILE_LIMITS = {"temp_f": (400, 620), "time": (5, 180), "boost_temp": (0, 36), "boost_time": (0, 60)}
+VAPOR = {0.0: "Smooth", 0.5: "Bold", 1.0: "Intense", 1.5: "Extreme"}
+PROFILE_NAME_MAX = 20   # bytes of UTF-8
 
 # Paths that might hold battery health / cycle data. Not documented anywhere -
 # the "Find battery data" button tries all of them and shows which ones answer.
@@ -162,7 +169,7 @@ def describe_raw(b):
 
 
 class Lorax:
-    """Minimal read-only Lorax client."""
+    """Minimal Lorax client. Only the heat profile editor ever writes."""
 
     def __init__(self, address, on_disconnect):
         # timeout in the constructor (not connect()) works with both old bleak and bleak 3
@@ -221,10 +228,16 @@ class Lorax:
             return None
         return data if status == 0 else None
 
+    async def write(self, path, data):
+        """Writes raw bytes to a path. Raises if the rig refuses."""
+        status, _ = await self._cmd(OP_WRITE_SHORT, struct.pack("<HB", 0, 0) + path.encode() + b"\x00" + data)
+        if status != 0:
+            raise RuntimeError(f"the rig refused {path} (code {status})")
+
 
 # ------------------------------------------------------------- storage ---
 DATA_FILE = HERE / "puffco_data.json"
-DEFAULT_DATA = {"device": None, "charges": [], "sessions": [],
+DEFAULT_DATA = {"device": None, "charges": [], "sessions": [], "profile_library": [],
                 "settings": {"auto_reconnect": True, "notify": True, "on_top": False}}
 
 
@@ -249,6 +262,37 @@ def save_data(d):
         os.replace(tmp, DATA_FILE)
     except Exception:
         pass
+
+
+def clean_profile(p):
+    """Checks a heat profile from the UI. Returns the cleaned profile, or an error message."""
+    name = str(p.get("name") or "").strip()
+    if not name:
+        return "Give the profile a name."
+    name = name.encode()[:PROFILE_NAME_MAX].decode(errors="ignore")
+    out = {"name": name}
+    for key, label in (("temp_f", "Temperature"), ("time", "Time"), ("boost_temp", "Boost temperature"),
+                       ("boost_time", "Boost time")):
+        v = p.get(key)
+        if v is None and key.startswith("boost"):
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return f"{label} needs a number."
+        lo, hi = PROFILE_LIMITS[key]
+        if not lo <= v <= hi:
+            return f"{label} has to be between {lo} and {hi}" + (" seconds." if "time" in key else "°F.")
+        out[key] = round(v, 1)
+    if p.get("vapor") is not None:
+        try:
+            v = float(p["vapor"])
+        except (TypeError, ValueError):
+            v = None
+        if v not in VAPOR:
+            return "Pick a vapor level."
+        out["vapor"] = v
+    return out
 
 
 def fmt_dur(sec):
@@ -386,18 +430,26 @@ class SessionTracker:
         self.data = data
         self.cur = None
         self.last_cool = None
+        self.curve = None      # heat curve of the current or last cycle: start, target and [seconds, °F] points
 
-    def update(self, state, temp, pct):
+    def update(self, state, temp, pct, target=None):
         now = time.time()
         hot = (state in HEATING) or (temp is not None and temp >= self.HOT_F)
         ev = None
         if hot and self.cur is None:
             self.cur = {"start": now, "peak": temp or 0,
                         "bat_start": pct if pct is not None else None}
+            self.curve = {"start": now, "target": target, "points": []}
         elif hot and self.cur is not None:
             if temp:
                 self.cur["peak"] = max(self.cur["peak"], temp)
-        elif not hot and self.cur is not None:
+        if hot and temp:
+            pts, t = self.curve["points"], round(now - self.curve["start"], 1)
+            if not pts or t - pts[-1][0] >= 0.5:
+                pts.append([t, round(temp, 1)])
+            if target:
+                self.curve["target"] = target
+        if not hot and self.cur is not None:
             c = self.cur
             self.cur = None
             dur = now - c["start"]
@@ -846,6 +898,7 @@ class Worker:
         self.emit("link", "connected")
         self.emit("status", "Connected.")
         await self.read_static()
+        await self.read_profiles()
         self.poll_task = asyncio.ensure_future(self.poll())
         return True
 
@@ -940,6 +993,49 @@ class Worker:
             hot = v.get("state") in HEATING or (v.get("temp") or 0) >= 150
             await asyncio.sleep(0.3 if hot else 1.5)
 
+    async def read_profiles(self):
+        d, out = self.dev, []
+        if not d:
+            return
+
+        async def f(path):
+            b = await d.read(path, 4)
+            return f32(b) if b else None
+
+        for i in range(PROFILE_SLOTS):
+            base = f"/u/app/hc/{i}/"
+            b = await d.read(base + "name")
+            temp = await f(base + "temp")
+            p = {"slot": i, "name": text(b) if b else f"Profile {i + 1}",
+                 "temp_f": round(c_to_f(temp)) if temp else None, "time": await f(base + "time")}
+            for key, leaf in (("vapor", "intn"), ("boost_temp", "btmp"), ("boost_time", "btim")):
+                if (x := await f(base + leaf)) is not None:   # older firmware doesn't have these
+                    p[key] = round(x, 1)
+            out.append(p)
+        self.emit("profiles", out)
+
+    async def write_profile(self, slot, p):
+        """Saves one heat profile slot. `p` has already been checked by Core.save_profile."""
+        d = self.dev
+        if not d:
+            self.emit("status", "Connect to your rig first.")
+            return
+        base = f"/u/app/hc/{slot}/"
+        try:
+            await d.write(base + "name", p["name"].encode() + b"\x00")
+            await d.write(base + "temp", struct.pack("<f", (p["temp_f"] - 32) * 5 / 9))
+            await d.write(base + "time", struct.pack("<f", p["time"]))
+            for key, leaf in (("vapor", "intn"), ("boost_temp", "btmp"), ("boost_time", "btim")):
+                if key in p:
+                    await d.write(base + leaf, struct.pack("<f", p[key]))
+            # the rig keeps a working copy of the selected profile: reselect it so the change applies now
+            if (b := await d.read("/p/app/hcs", 1)) and b[0] == slot:
+                await d.write("/p/app/hcs", bytes([slot]))
+            self.emit("status", f"Saved “{p['name']}” to slot {slot + 1}.")
+        except Exception as e:
+            self.emit("status", f"Couldn't save slot {slot + 1}: {e}")
+        await self.read_profiles()
+
     async def read_path(self, path):
         if not self.dev:
             self.emit("log", "Not connected.")
@@ -977,6 +1073,7 @@ class Core:
         self.link = "off"
         self.last = {}                 # latest value of every live field
         self.static = {}               # name / model / serial / firmware
+        self.profiles = []             # the rig's 4 heat profile slots, as last read
         self.status, self.status_t = "", 0.0
         self.log, self.log_seq = deque(maxlen=600), 0
         self.low_warned = self.was_ready = False
@@ -999,6 +1096,9 @@ class Core:
         self._save_timer = None
         self._accent_cache = (None, None)
         ensure_default_rigs()
+        eds = list_editions()
+        if eds and self.ov.get("edition") not in eds:     # fresh install or a deleted edition: show a real rig
+            self.ov["edition"] = "Daybreak (side)" if "Daybreak (side)" in eds else eds[0]
         self.server = OverlayServer(self)
         self.worker = Worker(self.q) if BleakClient is not None else None
         threading.Thread(target=self._pump, daemon=True).start()
@@ -1048,6 +1148,10 @@ class Core:
             self.charge.prev_code = None      # we can't see what happens while disconnected
         if state != "connected":
             self.phase.reset()
+            self.profiles = []
+
+    def on_profiles(self, profiles):
+        self.profiles = profiles
 
     def on_static(self, info):
         self.static.update({k: v for k, v in info.items() if v})
@@ -1061,7 +1165,7 @@ class Core:
             if ev in ("started", "full", "unplugged"):
                 self.low_warned = False
         self.phase.update(L.get("state"), v.get("temp"))
-        self.sessions.update(L.get("state"), v.get("temp"), L.get("battery"))
+        self.sessions.update(L.get("state"), v.get("temp"), L.get("battery"), L.get("target"))
         ready = L.get("state") == 8 and (L.get("temp") or 0) >= 300
         if ready and not self.was_ready:
             self.alert("Puffco is ready", "Heat-up finished - time to dab.", "ready")
@@ -1188,12 +1292,15 @@ class Core:
             return {
                 "now": now, "link": self.link, "status": self.status, "status_t": self.status_t,
                 "devices": self.devices, "device": self.data.get("device"), "static": self.static,
-                "live": L, "phase": self.phase.phase if self.link == "connected" else "off",
+                "live": L, "profiles": self.profiles, "library": list(self.data["profile_library"]),
+                "phase": self.phase.phase if self.link == "connected" else "off",
                 "labels": {"state": STATES.get(L.get("state"), "Unknown") if L.get("state") is not None else None,
                            "chamber": CHAMBERS.get(L.get("chamber")) if L.get("chamber") is not None else None,
                            "charge": CHARGE.get(L.get("charge")) if L.get("charge") is not None else None,
                            "source": CHARGE_SRC.get(L.get("charge_src")) if L.get("charge_src") is not None else None},
                 "charging": ch, "avg_full": avg, "avg_full_n": n,
+                "curve": dict(self.sessions.curve, points=list(self.sessions.curve["points"]),
+                              live=self.sessions.cur is not None) if self.sessions.curve else None,
                 "heating_for": now - self.sessions.cur["start"] if self.sessions.cur else None,
                 "today": self.sessions.today(),
                 "avg_session": sum(s["duration"] for s in recent) / len(recent) if recent else None,
@@ -1243,6 +1350,25 @@ class Core:
                 w.submit(w.probe())
             elif a == "read" and w and args.get("path"):
                 w.submit(w.read_path(str(args["path"]).strip()))
+            elif a == "save_profile":
+                return self.save_profile(args.get("slot"), args.get("profile") or {})
+            elif a == "refresh_profiles" and w and self.link == "connected":
+                w.submit(w.read_profiles())
+            elif a == "lib_save":
+                p = clean_profile(args.get("profile") or {})
+                if isinstance(p, str):
+                    return {"ok": False, "error": p}
+                lib, i = self.data["profile_library"], args.get("index")
+                if isinstance(i, int) and 0 <= i < len(lib):
+                    lib[i] = p
+                else:
+                    lib.append(p)
+                save_data(self.data)
+            elif a == "lib_remove":
+                lib, i = self.data["profile_library"], args.get("index")
+                if isinstance(i, int) and 0 <= i < len(lib):
+                    lib.pop(i)
+                    save_data(self.data)
             elif a == "clear_log":
                 self.log.clear()
             elif a == "clear_charges":
@@ -1271,6 +1397,23 @@ class Core:
                 webbrowser.open(self.server.url + "?demo=1")
             elif a in ("show", "hide", "quit") and self.ui:
                 getattr(self.ui, a)()
+        return {"ok": True}
+
+    def save_profile(self, slot, p):
+        if not (isinstance(slot, int) and 0 <= slot < PROFILE_SLOTS):
+            return {"ok": False, "error": "Pick a slot from 1 to 4."}
+        if not self.worker or self.link != "connected":
+            return {"ok": False, "error": "Connect to your rig first."}
+        if self.last.get("state") in HEATING:
+            return {"ok": False, "error": "Wait until the rig finishes heating, then save."}
+        p = clean_profile(p)
+        if isinstance(p, str):
+            return {"ok": False, "error": p}
+        have = next((x for x in self.profiles if x["slot"] == slot), {})
+        for key in ("vapor", "boost_temp", "boost_time"):   # only write what this firmware has
+            if key not in have:
+                p.pop(key, None)
+        self.worker.submit(self.worker.write_profile(slot, p))
         return {"ok": True}
 
     def set_ov(self, changes):
