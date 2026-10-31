@@ -14,7 +14,7 @@
 ## What it does
 
 **The app**
-- **Live dashboard:** chamber temperature, target temp, heat profile, how long it's been heating, and the current state.
+- **Live dashboard:** chamber temperature, target temp, heat profile, how long it's been heating, and the current state. A **Photo | 3D** switch on the rig card shows your rig as a photo or as the animated 3D model, using the same angle and motion settings as the overlay.
 - **Heat curve:** a live chart of the chamber temperature through each heat cycle, against the target. The last one stays up until the next.
 - **Heat profiles:** see the 4 profiles on your rig and edit their name, temperature, time, vapor level and boost. Keep a library of your own profiles on your PC to add, remove and put on the rig whenever you want.
 - **Battery:** charge level, charger type (USB, Qi wireless or Power Dock), how long it's been charging, when it'll be full, your average full-charge time and roughly how many dabs are left.

@@ -176,6 +176,17 @@ section[data-page].on { display: block; }
 .rigwrap .main { inset: 0; width: 100%; height: 100%; }
 .rigbox .floor { position: absolute; bottom: 14px; left: 50%; width: min(190px, 75%); height: 18px; transform: translateX(-50%);
   border-radius: 50%; background: radial-gradient(closest-side, var(--floor, rgba(var(--accent-rgb), .55)), transparent); filter: blur(4px); transition: background 1s; }
+/* photo / 3D switch on the dashboard rig */
+.rigbox .styleswitch { position: absolute; top: 12px; left: 12px; z-index: 3; display: flex; gap: 2px; padding: 3px; border-radius: 99px;
+  background: rgba(10,10,14,.55); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+.styleswitch button { border: 0; background: none; color: var(--dim); font: 600 11.5px/1 var(--font); padding: 6px 11px; border-radius: 99px; cursor: pointer; transition: background .2s, color .2s; }
+.styleswitch button:hover { color: var(--text); }
+.styleswitch button.on { background: rgba(255,255,255,.13); color: var(--text); }
+#rig3dDash { position: absolute; inset: 0; width: 100%; height: 100%; display: none; z-index: 1; transition: opacity .6s, filter .6s; }
+.rigbox.s3d #rig3dDash { display: block; }
+.rigbox.s3d .rigwrap, .rigbox.s3d .floor { display: none; }
+.rigbox .r3wait { position: absolute; inset: 0; display: none; place-items: center; color: var(--faint); font-size: 12.5px; z-index: 2; }
+.rigbox.s3d.loading .r3wait { display: grid; }
 .heroinfo { padding: 22px 24px 20px 6px; display: flex; flex-direction: column; }
 .heroinfo .state { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
   font-weight: 600; font-size: 13px; background: rgba(255,255,255,.06); border: 1px solid var(--line); }
@@ -401,7 +412,9 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
     <div class="card nobt" id="noBt" style="display:none">Bluetooth support isn't installed, so the rig can't connect. If you're running from source:  pip install bleak</div>
     <div class="grid">
       <div class="card hero span-8">
-        <div class="rigbox"><div class="rigwrap" id="rigwrap"><img class="main" id="rigImg" alt=""><img id="rigKnob" alt=""></div><div class="floor"></div></div>
+        <div class="rigbox"><div class="rigwrap" id="rigwrap"><img class="main" id="rigImg" alt=""><img id="rigKnob" alt=""></div><div class="floor"></div>
+          <canvas id="rig3dDash"></canvas><div class="r3wait">Loading the 3D model…</div>
+          <div class="styleswitch" id="dashStyle" title="Show the rig as a photo or the 3D model"><button data-v="photo">Photo</button><button data-v="3d">3D</button></div></div>
         <div class="heroinfo">
           <div class="state" id="stateChip"><span class="d"></span><span id="stateTxt">Offline</span></div>
           <div class="gaugewrap">
@@ -664,10 +677,72 @@ $('#scanBtn').onclick = () => { act('scan'); toast('Scanning for rigs - wake you
 $('#connBtn').onclick = () => S.link !== 'off' ? act('disconnect') : act('connect', { index: +$('#devSel').value || 0 });
 $('#trayBtn').onclick = () => act('hide');
 
+// ---------------------------------------------------- dashboard 3D rig ---
+// the same 3D renderer as the overlay, using the overlay's angle, motion and reaction settings
+let d3 = null, d3Loading = false, d3Failed = false, d3Last = performance.now(), d3Key = '';
+$$('#dashStyle button').forEach(b => b.onclick = () => { setSetting('cfg', 'dash_style', b.dataset.v); syncDashStyle(); });
+function syncDashStyle() {
+  const want = S.cfg.dash_style === '3d' && !d3Failed, box = $('.rigbox');
+  box.classList.toggle('s3d', want);
+  box.classList.toggle('loading', want && !d3);
+  $$('#dashStyle button').forEach(b => b.classList.toggle('on', b.dataset.v === (want ? '3d' : 'photo')));
+  if (want) ensureDash3d();
+  const q = S.cfg.dash_q3d || 'balanced';
+  if (d3 && d3.quality !== q) { d3.setQuality(q); d3Key = ''; }
+}
+async function ensureDash3d() {
+  if (d3 || d3Loading || d3Failed) return;
+  d3Loading = true;
+  try {
+    const mod = await import('/rig3d.js');
+    d3 = await mod.createRig3D($('#rig3dDash'), '/models/' + encodeURIComponent(S.ov.model3d || 'peak_pro_hd.glb'),
+                               { quality: S.cfg.dash_q3d || 'balanced' });
+    requestAnimationFrame(d3Loop);
+  } catch (e) {
+    console.warn('dashboard 3D model unavailable:', e);
+    d3Failed = true;
+    toast("The 3D model couldn't load here, so the dashboard is showing the photo.");
+  } finally { d3Loading = false; syncDashStyle(); }
+}
+function d3Loop(now) {
+  requestAnimationFrame(d3Loop);
+  const dt = Math.min(0.05, (now - d3Last) / 1000); d3Last = now;
+  const box = $('.rigbox');
+  if (!d3 || !S || !box.classList.contains('s3d') || page !== 'dashboard' || document.hidden) return;
+  const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, w = r.width * dpr, h = r.height * dpr;
+  if (w < 4 || h < 4) return;
+  const O = S.ov, L = S.live || {}, conn = S.link === 'connected', ph = conn ? S.phase : 'off', T = now / 1000;
+  const key = [Math.round(w), Math.round(h), O.view3d, O.tilt3d].join('/');
+  if (key !== d3Key) { d3Key = key; d3.layout(w, h, h * 0.15, h - 28 * dpr, O.view3d || 'front', O.tilt3d ?? 8); }
+  const chg = conn && [0, 1, 2, 3].includes(L.charge);
+  const prog = Math.max(0, Math.min(1, ((L.temp || 80) - 80) / ((L.target || 520) - 80)));
+  let ring = 0.05, glass = 0, heat = 0;
+  if (ph === 'standby') ring = chg ? 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(T * 2)) : 0.32 + 0.3 * (0.5 + 0.5 * Math.sin(T * Math.PI / 2));
+  else if (ph === 'heating') { ring = 0.75 + 0.25 * Math.sin(T * 4.5); glass = 0.25 + 0.55 * prog; heat = 0.2 + 0.5 * prog; }
+  else if (ph === 'active') { ring = 1; glass = 0.8 + 0.06 * Math.sin(T * 13); heat = 0.7; }
+  else if (ph === 'cooldown') { ring = 0.45; glass = 0.3; heat = 0.2; }
+  const rgb = (hexRgb(accentHex()) || [255, 138, 154]).map(v => v / 255);
+  const mode = ph === 'standby' && chg ? 'charging' : ph;
+  d3.frame(dt, T, {
+    phase: ph, inhaling: ph === 'active', ramp: 1, sT: 1, prog,
+    ring: ring * (O.light_intensity ?? 1), glass: glass * (O.glass_glow ?? 1), heat: O.heater_glow === false ? 0 : heat,
+    fill: ph === 'heating' && O.heat_fill !== false ? prog : 1, color: rgb, editionLight: (O.light || 'edition') === 'edition',
+    onPad: chg && O.pad !== false, full: L.charge === 2, battery: L.battery,
+    motion: O['m_' + mode] || 'still', slowSpd: O.spin_slow_speed ?? 1, fastSpd: O.spin_fast_speed ?? 1, spinDir: O.spin_dir ?? 1,
+    motionAmt: O.motion_amt ?? 1, evHeat: O.ev_heat, evReady: O.ev_ready, evFull: O.ev_full, evConnect: O.ev_connect,
+    pushIn: false, drift: O.drift, tiltHit: false, hitShake: false, ringHeat: O.ring_heat,
+    cap: O.knob_anim !== false, capAmt: O.knob_amount ?? 1, capStyle: O.cap_style, bubbles: O.bubbles !== false,
+    shadow: O.shadow !== false, reflection: false,
+  }, null);
+  const c = $('#rig3dDash');
+  c.style.opacity = conn ? 1 : 0.55; c.style.filter = conn ? '' : 'grayscale(.5)';
+}
+
 // ----------------------------------------------------------- dashboard ---
 function renderDash() {
   const L = S.live, conn = S.link === 'connected', ph = S.phase;
   loadRig();
+  syncDashStyle();
   // hero
   const [txt, col] = phaseInfo();
   $('#stateTxt').textContent = conn ? txt : S.link === 'off' ? 'Not connected' : 'Waiting for the rig';

@@ -666,7 +666,8 @@ for _title, _fields in OV_PAGES:
 
 APP_DEFAULTS = {"auto_reconnect": True, "notify": True, "notify_ready": True, "notify_full": True,
                 "notify_low": True, "low_pct": 15, "units": "F", "on_top": False,
-                "startup": False, "start_min": True, "close_to_tray": True}
+                "startup": False, "start_min": True, "close_to_tray": True,
+                "dash_style": "photo", "dash_q3d": "balanced"}
 NOTIFY = ("notify", True)
 APP_FIELDS = [
     {"t": "head", "label": "Connection"},
@@ -681,6 +682,10 @@ APP_FIELDS = [
     {"t": "head", "label": "Display"},
     {"k": "units", "t": "choice", "label": "Temperature", "opts": {"Fahrenheit (°F)": "F", "Celsius (°C)": "C"}},
     {"k": "on_top", "t": "bool", "label": "Keep this window on top"},
+    {"k": "dash_style", "t": "choice", "label": "Rig on the dashboard",
+     "opts": {"Photo": "photo", "3D model (needs more GPU)": "3d"}},
+    {"k": "dash_q3d", "t": "choice", "label": "Dashboard 3D quality", "when": ("dash_style", "3d"),
+     "opts": {"High": "high", "Balanced": "balanced", "Performance": "performance"}},
     {"t": "head", "label": "Running in the background"},
     {"k": "close_to_tray", "t": "choice", "label": "Closing the window",
      "opts": {"Keeps it running in the tray": True, "Quits Puffco Monitor": False}},
