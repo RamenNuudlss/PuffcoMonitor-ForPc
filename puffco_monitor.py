@@ -566,7 +566,7 @@ OV_PAGES = [
         {"t": "head", "label": "During a session", "when": STYLE_3D},
         {"k": "cap_style", "t": "choice", "label": "Carb cap", "when": (STYLE_3D, ("knob_anim", True)),
          "opts": {"Rocks and twists": "rock_twist", "Rocks back and forth": "rock", "Twists back and forth": "twist",
-                  "Spins around": "spin", "Lifts and turns": "lift"}},
+                  "Swirls around": "spin", "Lifts and turns": "lift"}},
         {"k": "tilt_hit", "t": "bool", "label": "Tips toward the camera on each inhale", "when": STYLE_3D},
         {"k": "tilt_amt", "t": "pct", "label": "How far it tips", "lo": 25, "hi": 300, "when": (STYLE_3D, ("tilt_hit", True))},
         {"k": "hit_shake", "t": "bool", "label": "Shakes a little while you're hitting it", "when": STYLE_3D},

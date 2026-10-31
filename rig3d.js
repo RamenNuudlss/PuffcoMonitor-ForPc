@@ -132,14 +132,13 @@ export async function createRig3D(canvas, url, opts = {}) {
   };
   const percR = perc ? (() => { const b = new Box3().setFromObject(perc); return Math.max(0.01, (b.max.x - b.min.x) * 0.22); })() : 0.03;
 
-  // carb cap: the whole cap (knob, sleeve and its strap) on one pivot where it sits on the threads,
-  // so it can rock, twist, spin or lift as a unit
+  // carb cap: just the stick and mushroom top (the CarbCap part), pivoting where the stick goes
+  // into the red cap below it, so it can rock, twist, swirl or lift
   let capPivot = null, capRest = null;
-  const capParts = ['CarbCap', 'AtomizerSleeve', 'AtomizerStrap'].map(part).filter(Boolean);
+  const capParts = ['CarbCap'].map(part).filter(Boolean);
   if (capParts.length) {
     const cb = new Box3(); capParts.forEach(o => cb.expandByObject(o));
-    const sleeve = part('AtomizerSleeve'), base = sleeve ? new Box3().setFromObject(sleeve) : cb;
-    const c = cb.getCenter(new Vector3()); c.y = base.min.y;
+    const c = cb.getCenter(new Vector3()); c.y = cb.min.y;
     capPivot = new Group(); capParts[0].parent.add(capPivot);
     capPivot.position.copy(capParts[0].parent.worldToLocal(c.clone()));
     capPivot.updateMatrixWorld(true); capParts.forEach(o => capPivot.attach(o));
@@ -405,11 +404,13 @@ export async function createRig3D(canvas, url, opts = {}) {
         capPh += dt * (s.inhaling ? 4.2 : 3.0);
         const w = Math.sin(capPh) + 0.18 * Math.sin(capPh * 2.3 + 1.1);
         const rock = st === 'rock' || st === 'rock_twist', twist = st === 'twist' || st === 'rock_twist' || st === 'lift';
-        capS.rz = approach(capS.rz, rock ? 13 * DEG * k * w : 0, 8, dt);
-        capS.rx = approach(capS.rx, rock ? 5 * DEG * k * Math.cos(capPh * 1.13) : 0, 8, dt);
-        if (st === 'spin' && on) { capSpin += dt * 3.2 * (0.4 + k); capS.ry = capSpin; }
-        else { capSpin = Math.round(capSpin / TAU) * TAU; capS.ry = approach(capS.ry, twist ? 38 * DEG * k * w : 0, 7, dt); }
-        capS.ly = approach(capS.ly, st === 'lift' && on ? 0.028 * MH * k * (0.55 + 0.45 * Math.sin(capPh * 0.5)) : 0, 6, dt);
+        const swirl = st === 'spin' && on;                       // tilted and circling, so the round top visibly moves
+        if (swirl) capSpin += dt * 4.2 * (0.5 + 0.5 * k);
+        const sw = swirl ? 16 * DEG * Math.min(1, k + 0.3) : 0;
+        capS.rz = approach(capS.rz, (rock ? 22 * DEG * k * w : 0) + sw * Math.sin(capSpin), 9, dt);
+        capS.rx = approach(capS.rx, (rock ? 8 * DEG * k * Math.cos(capPh * 1.13) : 0) + sw * Math.cos(capSpin), 9, dt);
+        capS.ry = approach(capS.ry, twist ? 40 * DEG * k * w : 0, 7, dt);
+        capS.ly = approach(capS.ly, st === 'lift' && on ? 0.03 * MH * k * (0.55 + 0.45 * Math.sin(capPh * 0.5)) : 0, 6, dt);
         capPivot.rotation.set(capS.rx, capS.ry, capS.rz);
         capPivot.position.set(capRest.x, capRest.y + capS.ly, capRest.z);
       }
