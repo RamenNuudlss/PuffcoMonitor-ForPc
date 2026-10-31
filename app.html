@@ -494,7 +494,7 @@ pre.log { margin: 14px 0 0; height: 470px; overflow: auto; padding: 14px 16px; b
       </div>
       <div class="card previewcard">
         <h3>Live preview <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">· exactly what OBS shows</span></h3>
-        <div class="preview"><iframe id="ovFrame" src="/overlay" title="Overlay preview" style="color-scheme: normal"></iframe></div>
+        <div class="preview"><iframe id="ovFrame" src="about:blank" title="Overlay preview" style="color-scheme: normal"></iframe></div>
         <div class="tests" id="tests"></div>
         <div class="urlrow"><code id="ovUrl"></code><button class="btn icon" id="copyUrl" title="Copy"><svg class="i"><use href="#i-copy"/></svg></button></div>
         <div class="hint">In OBS add a <b>Browser</b> source with this URL, Width 1080 and Height 1800, then shrink it into place. Changes here show up live.</div>
@@ -585,8 +585,18 @@ const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) retu
 const TITLES = { dashboard: ['Dashboard', ''], profiles: ['Heat profiles', 'See, edit and save your heat profiles'], history: ['History', 'Every charge and session the app has seen'],
   overlay: ['OBS overlay', 'Your rig on stream - everything here is live'], settings: ['Settings', 'How Puffco Monitor behaves'],
   explorer: ['Explorer', 'Raw values straight from the rig'] };
+// the overlay preview and the dashboard 3D only draw while you can see them
+let appShown = true;
+window.appVisible = v => { appShown = !!v; syncPreview(); };
+document.addEventListener('visibilitychange', () => syncPreview());
+function syncPreview() {
+  const f = $('#ovFrame'); if (!f) return;
+  const src = appShown && !document.hidden && page === 'overlay' ? '/overlay' : 'about:blank';
+  if (f.dataset.src !== src) { f.dataset.src = src; f.src = src; }
+}
 function go(p) {
   page = p;
+  syncPreview();
   $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.go === p));
   $$('section[data-page]').forEach(s => s.classList.toggle('on', s.dataset.page === p));
   $('#title').textContent = TITLES[p][0];
@@ -679,7 +689,8 @@ $('#trayBtn').onclick = () => act('hide');
 
 // ---------------------------------------------------- dashboard 3D rig ---
 // the same 3D renderer as the overlay, using the overlay's angle, motion and reaction settings
-let d3 = null, d3Loading = false, d3Failed = false, d3Last = performance.now(), d3Key = '';
+let d3 = null, d3Loading = false, d3Failed = false, d3Last = performance.now(), d3Key = '', d3Acc = 0;
+const D3_FPS = 30;                 // plenty for a card on the dashboard, and easy on the GPU
 $$('#dashStyle button').forEach(b => b.onclick = () => { setSetting('cfg', 'dash_style', b.dataset.v); syncDashStyle(); });
 function syncDashStyle() {
   const want = S.cfg.dash_style === '3d' && !d3Failed, box = $('.rigbox');
@@ -706,9 +717,11 @@ async function ensureDash3d() {
 }
 function d3Loop(now) {
   requestAnimationFrame(d3Loop);
-  const dt = Math.min(0.05, (now - d3Last) / 1000); d3Last = now;
+  d3Acc += (now - d3Last) / 1000; d3Last = now;
   const box = $('.rigbox');
-  if (!d3 || !S || !box.classList.contains('s3d') || page !== 'dashboard' || document.hidden) return;
+  if (!d3 || !S || !box.classList.contains('s3d') || page !== 'dashboard' || document.hidden || !appShown) { d3Acc = 0; return; }
+  if (d3Acc < 1 / D3_FPS - 0.002) return;
+  const dt = Math.min(0.1, d3Acc); d3Acc = 0;
   const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, w = r.width * dpr, h = r.height * dpr;
   if (w < 4 || h < 4) return;
   const O = S.ov, L = S.live || {}, conn = S.link === 'connected', ph = conn ? S.phase : 'off', T = now / 1000;

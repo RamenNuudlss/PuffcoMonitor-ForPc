@@ -92,7 +92,8 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const DEMO = qs.has('demo');
-const MAXDT = Math.min(1, Math.max(0.01, +(qs.get('maxdt') || 0.05)));   // ?maxdt= is only for testing on slow machines
+const MAXDT = Math.min(1, Math.max(0.01, +(qs.get('maxdt') || 0.05)));
+const FPS = Math.min(240, Math.max(10, +(qs.get('fps') || 60)));   // OBS rarely needs more; a 240 Hz screen shouldn't make it work 4x harder   // ?maxdt= is only for testing on slow machines
 const HTTP = location.protocol.startsWith('http');
 const BASE = qs.get('server') || (HTTP ? '' : 'http://127.0.0.1:8765');
 const RIGS = (HTTP ? BASE : '') + (HTTP ? '/rigs/' : 'rigs/');
@@ -709,6 +710,7 @@ let knobAng = 0, knobPhase = 0, showUntil = 0, sessUntil = 0, lastPhaseKey = nul
 let popP = null, popV = 0, landArmed = true, landT = null;                  // entrance animation: 0 = on screen, 1 = gone
 function frame(now) {
   requestAnimationFrame(frame);
+  if (now - last < 1000 / FPS - 1.5) return;
   const dt = Math.min(MAXDT, (now - last) / 1000); last = now;
   if (!L || !rig) return;
   const T = now / 1000, ph = st.phase, since = (now - phaseSince) / 1000;

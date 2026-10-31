@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-VERSION = "2.3"
+VERSION = "2.3.1"
 FROZEN = getattr(sys, "frozen", False)
 RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))          # files bundled with the app
 HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent   # your data
@@ -1654,6 +1654,10 @@ class Host:
                 background_color="#0b0b0f", hidden=self.hidden, on_top=bool(self.core.cfg["on_top"]))
             self.window.events.closing += self._closing
             self.window.events.shown += self._dark_titlebar
+            self.window.events.shown += lambda: self._tell_visible(True)
+            for ev, vis in (("minimized", False), ("restored", True), ("maximized", True)):
+                if hasattr(self.window.events, ev):
+                    getattr(self.window.events, ev).__iadd__(lambda v=vis: self._tell_visible(v))
             webview.start(gui="edgechromium" if sys.platform.startswith("win") else None, icon=str(RES / "icon.ico"))
         except Exception:
             log.exception("native window unavailable - using a browser window instead")
@@ -1680,7 +1684,17 @@ class Host:
             self.done.set()
             return True
         self.window.hide()
+        self._tell_visible(False)
         return False
+
+    def _tell_visible(self, visible):
+        """Let the page know when it's out of sight, so the 3D views stop drawing (a hidden
+        WebView2 window keeps rendering otherwise)."""
+        try:
+            if self.window is not None:
+                self.window.evaluate_js(f"window.appVisible && window.appVisible({'true' if visible else 'false'})")
+        except Exception:
+            pass
 
     def _dark_titlebar(self):
         """Dark Windows title bar to match the app (Windows 10 2004+ / 11)."""
@@ -1719,12 +1733,14 @@ class Host:
                 self.window.restore()
             except Exception:
                 pass
+            self._tell_visible(True)
         else:
             self.open_browser()
 
     def hide(self):
         if self.window is not None:
             self.window.hide()
+            self._tell_visible(False)
 
     def on_top(self, on):
         if self.window is not None:
