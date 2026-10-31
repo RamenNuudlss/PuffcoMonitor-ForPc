@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-VERSION = "2.1"
+VERSION = "2.2"
 FROZEN = getattr(sys, "frozen", False)
 RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))          # files bundled with the app
 HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent   # your data
@@ -476,8 +476,11 @@ class SessionTracker:
 
 # --------------------------------------------------------------- overlay ---
 RIGS_DIR = HERE / "rigs"
+MODELS_DIR = HERE / "models"          # 3D model(s) for the overlay's 3D style
 OVERLAY_DEFAULTS = {
     # rig
+    "style": "photo", "q3d": "high", "view3d": "front", "tilt3d": 8, "idle3d": "turntable", "idle_speed": 1.0,
+    "model3d": "peak_pro_hd.glb", "spin_heat": True, "push_in": True, "tilt_hit": True, "spin_full": True, "hop_connect": True,
     "edition": "", "rig_scale": 1.0, "offline_mode": "dim", "reflection": True, "shadow": True, "pad": True,
     "knob_anim": True, "knob_amount": 1.0, "bubbles": True,
     # vapor
@@ -502,21 +505,44 @@ LIGHT_PRESETS = {"Match edition": "edition", "Pink": "#ff5ca8", "Purple": "#9b7b
                  "White": "#f4f1ff", "Rainbow": "rainbow"}
 SMOKE_MODES = {"Rhythm: smoke, pause, wait, repeat": "session", "Nonstop cloud": "constant", "No vapor": "off"}
 RHYTHM = ("smoke", "session")
+STYLE_3D, STYLE_PHOTO = ("style", "3d"), ("style", "photo")
+VIEW_ANGLES = {"Front": "front", "Three-quarter": "three_quarter", "Side (glass on the left)": "side",
+               "Three-quarter, other way": "three_quarter_other", "Other side": "side_other", "Back": "back"}
 POPUP = ("visibility", "popup")
 
 OV_PAGES = [
     ("Rig", [
-        {"k": "edition", "t": "edition", "label": "Edition"},
+        {"k": "style", "t": "choice", "label": "Style",
+         "opts": {"Photo (light on your PC)": "photo", "3D model, HD (high performance)": "3d"}},
+        {"t": "note", "when": STYLE_3D,
+         "text": "The 3D model is sharper and moves in real 3D, but it needs a lot more graphics power than the photo. "
+                 "If your game or OBS starts to stutter, lower the 3D quality below or switch back to Photo."},
+        {"k": "edition", "t": "edition", "label": "Edition", "when": STYLE_PHOTO},
         {"k": "rig_scale", "t": "pct", "label": "Size", "lo": 50, "hi": 150},
         {"k": "offline_mode", "t": "choice", "label": "When disconnected",
          "opts": {"Dim it": "dim", "Hide it": "hide", "Show it like normal": "normal"}},
+        {"t": "head", "label": "3D model", "when": STYLE_3D},
+        {"k": "q3d", "t": "choice", "label": "3D quality", "when": STYLE_3D,
+         "opts": {"High (sharpest, heaviest)": "high", "Balanced": "balanced", "Performance (lightest, simpler glass)": "performance"}},
+        {"k": "view3d", "t": "choice", "label": "Angle", "opts": VIEW_ANGLES, "when": STYLE_3D},
+        {"k": "tilt3d", "t": "num", "label": "Camera height", "lo": 0, "hi": 35, "fmt": "{}°", "when": STYLE_3D},
+        {"k": "idle3d", "t": "choice", "label": "In standby it", "when": STYLE_3D,
+         "opts": {"Slowly turns around (turntable)": "turntable", "Gently sways side to side": "sway", "Stays still": "still"}},
+        {"k": "idle_speed", "t": "pct", "label": "Turning speed", "lo": 25, "hi": 300,
+         "when": (STYLE_3D, ("idle3d", ("turntable", "sway")))},
+        {"t": "head", "label": "3D animations", "when": STYLE_3D},
+        {"k": "spin_heat", "t": "bool", "label": "Spins around once when it starts heating", "when": STYLE_3D},
+        {"k": "push_in", "t": "bool", "label": "Camera eases in while it heats up", "when": STYLE_3D},
+        {"k": "tilt_hit", "t": "bool", "label": "Tips toward the camera on each inhale", "when": STYLE_3D},
+        {"k": "spin_full", "t": "bool", "label": "Victory spin when it's fully charged", "when": STYLE_3D},
+        {"k": "hop_connect", "t": "bool", "label": "Hops when it connects", "when": STYLE_3D},
         {"t": "head", "label": "Details"},
         {"k": "reflection", "t": "bool", "label": "Reflection on the floor"},
         {"k": "shadow", "t": "bool", "label": "Drop shadow"},
         {"k": "pad", "t": "bool", "label": "Charging pad slides in while it's charging"},
         {"k": "bubbles", "t": "bool", "label": "Bubbles in the glass while it's smoking"},
-        {"k": "knob_anim", "t": "bool", "label": "Carb cap rocks back and forth during a session"},
-        {"k": "knob_amount", "t": "pct", "label": "Carb cap rocking", "lo": 25, "hi": 250, "when": ("knob_anim", True)},
+        {"k": "knob_anim", "t": "bool", "label": "Carb cap moves during a session (rocks on the photo, twists on the 3D model)"},
+        {"k": "knob_amount", "t": "pct", "label": "Carb cap movement", "lo": 25, "hi": 250, "when": ("knob_anim", True)},
     ]),
     ("Vapor", [
         {"k": "smoke", "t": "choice", "label": "Vapor", "opts": SMOKE_MODES},
@@ -532,7 +558,7 @@ OV_PAGES = [
         {"k": "smoke_speed", "t": "pct", "label": "Speed", "lo": 25, "hi": 200},
         {"k": "smoke_swirl", "t": "pct", "label": "Swirl", "lo": 0, "hi": 250},
         {"k": "smoke_linger", "t": "pct", "label": "Hangs around", "lo": 25, "hi": 300},
-        {"k": "quality", "t": "choice", "label": "Quality",
+        {"k": "quality", "t": "choice", "label": "Vapor quality",
          "opts": {"High (sharpest)": "high", "Medium": "medium", "Low (easiest on your PC)": "low"}},
         {"k": "smoke_tint", "t": "bool", "label": "Tint the vapor with the light color as it leaves the glass"},
         {"k": "cooldown_wisps", "t": "bool", "label": "Last few wisps after the session ends"},
@@ -558,7 +584,9 @@ OV_PAGES = [
         {"k": "entrance", "t": "choice", "label": "Comes in by",
          "opts": {"Swooping in from the left": "left", "Swooping in from the right": "right",
                   "Rising up from below": "up", "Dropping in from above": "down",
-                  "Zooming in": "zoom", "Fading in": "fade", "Just appearing": "none"}},
+                  "Zooming in": "zoom", "Fading in": "fade", "Just appearing": "none",
+                  "Spinning in from the side (3D)": "spin", "Twirling in (3D)": "twirl",
+                  "Dropping in and landing (3D)": "land"}},
         {"k": "anim_speed", "t": "pct", "label": "Speed", "lo": 25, "hi": 300},
         {"k": "bounce", "t": "pct", "label": "Bounce", "lo": 0, "hi": 100},
         {"k": "lean", "t": "bool", "label": "Leans into the motion when it swoops"},
@@ -598,6 +626,11 @@ OV_PAGES = [
         {"k": "floor_glow", "t": "bool", "label": "Light spilling onto the floor"},
     ]),
 ]
+# rows that only apply to one style are hidden (not just dimmed) for the other one
+for _title, _fields in OV_PAGES:
+    for _f in _fields:
+        if _f.get("when") and '"style"' in json.dumps(_f["when"]):
+            _f["hide"] = True
 
 APP_DEFAULTS = {"auto_reconnect": True, "notify": True, "notify_ready": True, "notify_full": True,
                 "notify_low": True, "low_pct": 15, "units": "F", "on_top": False,
@@ -638,6 +671,18 @@ def ensure_default_rigs():
                     shutil.copytree(ed, RIGS_DIR / ed.name)
     except OSError:
         log.exception("copying default editions")
+
+
+def ensure_default_models():
+    src = RES / "models"
+    try:
+        if src.is_dir() and src.resolve() != MODELS_DIR.resolve():
+            MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            for f in src.glob("*.glb"):
+                if not (MODELS_DIR / f.name).exists():
+                    shutil.copy2(f, MODELS_DIR / f.name)
+    except OSError:
+        log.exception("copying the 3D model")
 
 
 def list_editions():
@@ -805,6 +850,18 @@ class OverlayServer:
                                                "light_presets": LIGHT_PRESETS})
                     if path == "/state":
                         return self.send(200, json.dumps(app.overlay_state()).encode(), "application/json")
+                    if path == "/rig3d.js":
+                        return self.send(200, (RES / "rig3d.js").read_bytes(), "text/javascript; charset=utf-8")
+                    if path.startswith("/vendor/"):
+                        d = (RES / "vendor").resolve()
+                        f = (d / path[8:]).resolve()
+                        if d in f.parents and f.is_file() and f.suffix == ".js":
+                            return self.send(200, f.read_bytes(), "text/javascript; charset=utf-8")
+                    if path.startswith("/models/"):
+                        for d in (MODELS_DIR, RES / "models"):     # a model you drop in the folder wins
+                            f = (d / path[8:]).resolve()
+                            if d.resolve() in f.parents and f.is_file() and f.suffix.lower() == ".glb":
+                                return self.send(200, f.read_bytes(), "model/gltf-binary")
                     if path in ("/rigs", "/rigs/"):
                         return self.send(200, json.dumps(list_editions()).encode(), "application/json")
                     if path.startswith("/rigs/"):
@@ -1096,6 +1153,7 @@ class Core:
         self._save_timer = None
         self._accent_cache = (None, None)
         ensure_default_rigs()
+        ensure_default_models()
         eds = list_editions()
         if eds and self.ov.get("edition") not in eds:     # fresh install or a deleted edition: show a real rig
             self.ov["edition"] = "Daybreak (side)" if "Daybreak (side)" in eds else eds[0]
@@ -1735,7 +1793,7 @@ def selftest():
             out.append(f"ok   {mod}")
         except Exception as e:
             out.append(f"FAIL {mod}: {e!r}")
-    for f in ("app.html", "overlay.html", "icon.png", "icon.ico"):
+    for f in ("app.html", "overlay.html", "icon.png", "icon.ico", "rig3d.js", "vendor/three-lite.js", "models/peak_pro_hd.glb"):
         out.append(f"{'ok  ' if (RES / f).is_file() else 'MISS'} {f}")
     (HERE / "selftest.txt").write_text("\n".join(out))
 

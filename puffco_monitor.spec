@@ -5,7 +5,8 @@ from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = ['add_rig'] + collect_submodules('bleak.backends.winrt')
 
-datas = [('app.html', '.'), ('overlay.html', '.'), ('icon.png', '.'), ('icon.ico', '.')]
+datas = [('app.html', '.'), ('overlay.html', '.'), ('icon.png', '.'), ('icon.ico', '.'),
+         ('rig3d.js', '.'), ('vendor', 'vendor'), ('models', 'models')]   # the 3D style
 if os.path.isdir('rigs'):
     datas.append(('rigs', 'rigs'))      # default editions, copied next to the exe on first run
 

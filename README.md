@@ -29,6 +29,7 @@
 - Shows standby, heating, and the session (labeled "Boofin" by default). Smoke follows an adjustable breathing rhythm: smoke on the inhale, a clear exhale, then a pause.
 - A charging pad slides in while it charges. The carb cap rocks during a session, bubbles rise in the glass, and there's a floor reflection and glow.
 - **Pop-up mode:** the rig swoops in when something changes and stays up through the whole heat-up and session. The info bar can stay on screen by itself.
+- **3D model style (HD):** swap the photo for a real 3D model of the rig. It turns like a turntable in standby, spins when it starts heating, its light ring fills up around the base as it heats, the heater glows, the carb cap twists and the rig tips toward the camera on each inhale, bubbles rise in the glass, and a 3D charging pad shows the battery. It also gets 3D entrances: spinning in, twirling in and landing. It needs much more GPU than the photo, so it has its own quality setting.
 - Everything is adjustable from the app with a live preview, including sizes, timings, colors, wording, animations and when it hides.
 
 | | |
@@ -54,6 +55,12 @@ The window uses Microsoft Edge WebView2, which comes with Windows 11 and most Wi
 3. Set the width to **1080** and the height to **1800**, then shrink the source into place. It's rendered at 2× so it stays sharp.
 
 Puffco Monitor has to be running for the overlay to update. Changes you make on the app's **OBS overlay** page show up live.
+
+## The 3D model style
+
+On the **OBS overlay** page, set **Rig → Style** to **3D model, HD (high performance)**. You can choose the 3D quality (High, Balanced or Performance), the angle, the camera height, what it does in standby, and which 3D animations play. If OBS or your game stutters, try **Balanced** first.
+
+The model is `models/peak_pro_hd.glb`. To use a different one, drop a `.glb` with the same name into the `models` folder next to the app. Animations find parts by name (`LightRing`, `Glass`, `GlassPercolator`, `CarbCap`, `AtomizerThreads`), and anything missing is skipped. The 3D style is rendered with [three.js](https://threejs.org) (MIT, bundled in `vendor/`).
 
 ## Adding your own edition
 
@@ -94,6 +101,7 @@ Everything stays on your PC, in the same folder as the app:
 | `puffco_data.json` | Your rig's name and Bluetooth address, charge and session history, saved heat profiles, and all settings |
 | `puffco_monitor.log` | Errors, for troubleshooting |
 | `rigs/` | Overlay editions |
+| `models/` | The 3D model for the overlay's 3D style |
 
 The app only talks to your rig and to `127.0.0.1`. The overlay server listens on port 8765, or the next free port up to 8770.
 

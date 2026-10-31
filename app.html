@@ -263,6 +263,11 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .f .val { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); background: rgba(255,255,255,.06); border-radius: 7px; padding: 3px 7px; }
 .f label { color: #c9c9d3; font-size: 13.5px; }
 .f.off { opacity: .35; pointer-events: none; }
+.f.hide.off, .group.hide.off { display: none; }
+.f.note { display: block; color: var(--dim); font-size: 12.5px; line-height: 1.55; padding: 4px 0 12px; border-top: 0;
+  background: none; }
+.f.note::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 8px 1px 0;
+  background: var(--warn, #f6b84b); box-shadow: 0 0 8px var(--warn, #f6b84b); }
 .f .ctl.duo { display: flex; gap: 8px; }
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .swatches button { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; position: relative;
@@ -936,7 +941,11 @@ function buildFields(container, fields, store, defaults) {
     return card;
   };
   for (const f of fields) {
-    if (f.t === 'head') { group = newGroup(f.label); continue; }
+    if (f.t === 'head') {
+      group = newGroup(f.label);
+      if (f.when) { group.classList.add('hide'); condEls.push([group, store, f.when]); }
+      continue;
+    }
     if (!group) group = newGroup('');
     const row = document.createElement('div');
     row.className = 'f';
@@ -994,12 +1003,15 @@ function buildFields(container, fields, store, defaults) {
         if (sel.dataset.v !== html) { sel.innerHTML = html; sel.dataset.v = html; }
         sel.value = get();
       };
+    } else if (f.t === 'note') {
+      row.classList.add('note');
+      row.textContent = f.text;
     } else if (f.t === 'buttons') {
       row.className = 'btnrow';
       row.innerHTML = f.items.map(([l, a]) => `<button class="btn sm ${a === 'quit' ? 'danger' : ''}" data-a="${a}">${esc(l)}</button>`).join('');
       row.querySelectorAll('button').forEach(b => b.onclick = () => ACTIONS[b.dataset.a]());
     }
-    if (f.when) condEls.push([row, store, f.when]);
+    if (f.when) { condEls.push([row, store, f.when]); if (f.hide) row.classList.add('hide'); }
     group.append(row);
     if (row.sync) syncers.push([row, store, k]);
   }
