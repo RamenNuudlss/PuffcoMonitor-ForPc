@@ -11,7 +11,9 @@
  *   session   carb cap twists back and forth, the rig tips toward the camera on each inhale,
  *             bubbles rise in the glass, and the smoke follows the real mouthpiece
  *   charging  a 3D charging pad appears and the rig settles onto it; its ring shows the battery
- *   events    victory spin when it's fully charged, a hop when it connects
+ *   motion    per mode: still, slow or fast spin, sway, float, rock, bounce or wobble
+ *   reactions spin, double spin, hop, hop-and-spin, flip, shake or nod when it starts heating,
+ *             when it's ready, when it's fully charged and when it connects
  *   pop-up    3D entrances: spinning in, twirling in, dropping in and landing with a squash
  *
  * Parts are found by name (LightRing, Glass, GlassPercolator, CarbCap, AtomizerThreads), so
@@ -130,18 +132,23 @@ export async function createRig3D(canvas, url, opts = {}) {
   };
   const percR = perc ? (() => { const b = new Box3().setFromObject(perc); return Math.max(0.01, (b.max.x - b.min.x) * 0.22); })() : 0.03;
 
-  // carb cap: re-parent onto a pivot at its center so it can twist on its own axis
-  let capPivot = null;
-  if (cap) {
-    const cb = new Box3().setFromObject(cap), c = cb.getCenter(new Vector3());
-    capPivot = new Group(); cap.parent.add(capPivot);
-    capPivot.position.copy(cap.parent.worldToLocal(c.clone()));
-    capPivot.updateMatrixWorld(true); capPivot.attach(cap);
+  // carb cap: the whole cap (knob, sleeve and its strap) on one pivot where it sits on the threads,
+  // so it can rock, twist, spin or lift as a unit
+  let capPivot = null, capRest = null;
+  const capParts = ['CarbCap', 'AtomizerSleeve', 'AtomizerStrap'].map(part).filter(Boolean);
+  if (capParts.length) {
+    const cb = new Box3(); capParts.forEach(o => cb.expandByObject(o));
+    const sleeve = part('AtomizerSleeve'), base = sleeve ? new Box3().setFromObject(sleeve) : cb;
+    const c = cb.getCenter(new Vector3()); c.y = base.min.y;
+    capPivot = new Group(); capParts[0].parent.add(capPivot);
+    capPivot.position.copy(capParts[0].parent.worldToLocal(c.clone()));
+    capPivot.updateMatrixWorld(true); capParts.forEach(o => capPivot.attach(o));
+    capRest = capPivot.position.clone();
   }
 
   // ---- materials ----------------------------------------------------------------------------
   // light ring: emissive, with a mask that fills up around the base from the front (heat progress)
-  const ringU = { uFill: { value: 1 }, uEdge: { value: 0 } };
+  const ringU = { uFill: { value: 1 }, uEdge: { value: 0 }, uChase: { value: -1 } };
   let ringMat = null;
   if (ring) {
     ringMat = new MeshPhysicalMaterial({ color: 0x1a1a20, roughness: 0.35, metalness: 0, vertexColors: false,
@@ -149,12 +156,18 @@ export async function createRig3D(canvas, url, opts = {}) {
     ringMat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, ringU);
       sh.vertexShader = 'varying vec3 vRingP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvRingP = position;');
-      sh.fragmentShader = 'uniform float uFill, uEdge;\nvarying vec3 vRingP;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+      sh.fragmentShader = 'uniform float uFill, uEdge, uChase;\nvarying vec3 vRingP;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
          float ra = abs(atan(vRingP.x, vRingP.z)) / 3.14159265;          // 0 at the front, 1 at the back
          float lit = smoothstep(uFill + 0.03, uFill - 0.03, ra);
          float edge = exp(-pow((ra - uFill) * 14.0, 2.0)) * uEdge;      // bright leading edge while it fills
-         totalEmissiveRadiance *= lit * 0.9 + 0.1 * step(0.999, uFill) + edge * 1.6;`);
+         float m = lit * 0.9 + 0.1 * step(0.999, uFill) + edge * 1.6;
+         if (uChase >= 0.0) {                                           // a bright arc racing around the ring
+           float a01 = atan(vRingP.x, vRingP.z) / 6.2831853 + 0.5;
+           float d = fract(a01 - uChase + 0.5) - 0.5;
+           m = 0.22 + 1.9 * exp(-d * d * 90.0);
+         }
+         totalEmissiveRadiance *= m;`);
     };
     ring.material = ringMat;
   }
@@ -192,8 +205,9 @@ export async function createRig3D(canvas, url, opts = {}) {
   for (const l of [glassLight, heatLight, ringLight]) { l.layers.enableAll(); holder.add(l); }
 
   // ---- scene graph: floor > lift (pad / hop) > tilt > spin > model ---------------------------
-  const rigRoot = new Group(), tiltG = new Group(), spinG = new Group();
-  rigRoot.add(tiltG); tiltG.add(spinG); spinG.add(holder); scene.add(rigRoot);
+  const rigRoot = new Group(), tiltG = new Group(), flipG = new Group(), flipIn = new Group(), spinG = new Group();
+  flipG.position.y = MH * 0.5; flipIn.position.y = -MH * 0.5;          // flips turn about the middle of the rig
+  rigRoot.add(tiltG); tiltG.add(flipG); flipG.add(flipIn); flipIn.add(spinG); spinG.add(holder); scene.add(rigRoot);
 
   // bubbles in the glass (instanced spheres), rendered after the glass so they show through it
   const NB = 90, bubbles = [];
@@ -280,7 +294,20 @@ export async function createRig3D(canvas, url, opts = {}) {
 
   // ---- animation state ----------------------------------------------------------------------
   let q = QUALITY.high, qName = 'high', lastPhase = null, wasFull = false, wasOff = true;
-  let idleYaw = 0, idleT = 0, evSpin = null, hop = null, capAng = 0, capPh = 0, pushK = 1, ringFlash = 0;
+  let spinYaw = 0, spinRate = 0, moments = [], capPh = 0, capSpin = 0, pushK = 1, ringFlash = 0;
+  const env = { sway: 0, float: 0, rock: 0, bounce: 0, wobble: 0 };   // fades between motions
+  const capS = { rx: 0, ry: 0, rz: 0, ly: 0 };
+  // one-off reactions ("moments"): each returns how it moves the rig at u = 0..1 of its run
+  const MOMENTS = {
+    spin:    { dur: 1.6, f: (u, d) => ({ yaw: d * TAU * ease(u) }) },
+    spin2:   { dur: 2.2, f: (u, d) => ({ yaw: d * 2 * TAU * ease(u) }) },
+    hop:     { dur: 0.7, f: u => ({ lift: 0.08 * MH * Math.sin(Math.PI * u) }) },
+    hopspin: { dur: 1.2, f: (u, d) => ({ lift: 0.11 * MH * Math.sin(Math.PI * u), yaw: d * TAU * ease(u) }) },
+    flip:    { dur: 1.3, f: u => ({ lift: 0.2 * MH * Math.sin(Math.PI * u), flip: TAU * ease(u) }) },
+    shake:   { dur: 0.9, f: u => ({ roll: 7 * DEG * Math.sin(u * Math.PI * 11) * (1 - u) }) },
+    nod:     { dur: 1.1, f: u => ({ pitch: 15 * DEG * Math.sin(Math.PI * u) * Math.sin(Math.PI * u) }) },
+  };
+  const play = (kind, flash = true) => { if (MOMENTS[kind]) { moments.push({ kind, t: 0 }); if (flash) ringFlash = 1; } };
   const tiltS = new Spring(0, 7, 0.75), padS = new Spring(0, 7, 0.8), leanS = new Spring(0, 9, 0.9);
   const accent = new Color(), white = new Color(1, 1, 1);
 
@@ -297,6 +324,8 @@ export async function createRig3D(canvas, url, opts = {}) {
 
   return {
     MH, get quality() { return qName; }, setQuality,
+    /* play a reaction now: spin, spin2, hop, hopspin, flip, shake or nod */
+    react(kind) { play(kind); },
     /* size the canvas (device pixels) and say where the tip and base must land, in canvas pixels */
     layout(pxW, pxH, tipPx, floorPx, viewName, tiltDeg) {
       const w = Math.max(2, Math.round(pxW * q.res)), h = Math.max(2, Math.round(pxH * q.res));
@@ -310,27 +339,46 @@ export async function createRig3D(canvas, url, opts = {}) {
     /* draw one frame. s = state from the overlay. Returns where the mouthpiece is (canvas px, 0-1). */
     frame(dt, T, s, refl) {
       const ph = s.phase, idle = ph === 'off' || ph === 'standby', busy = !idle;
-      // -- events
+      // -- moments: one-off reactions when something happens
       if (lastPhase !== null && ph !== lastPhase) {
-        if (ph === 'heating' && s.spinHeat) evSpin = { t: 0, dur: 1.7, turns: 1 };
-        if (lastPhase === 'off' && ph !== 'off' && s.hopConnect) { hop = { t: 0, dur: 0.7, h: 0.07 * MH }; ringFlash = 1; }
+        if (ph === 'heating') play(s.evHeat, false);
+        if (ph === 'active') play(s.evReady);
+        if (lastPhase === 'off' && ph !== 'off') play(s.evConnect);
       }
       lastPhase = ph;
       const full = s.onPad && s.full;
-      if (full && !wasFull && s.spinFull) { evSpin = { t: 0, dur: 2.2, turns: 2 }; hop = { t: 0, dur: 0.8, h: 0.09 * MH }; ringFlash = 1; }
+      if (full && !wasFull) play(s.evFull);
       wasFull = full;
-      // -- idle motion: turntable / sway; eases back to facing the chosen angle while busy
-      const spd = Math.max(0, s.idleSpeed);
-      if (idle && s.idle === 'turntable') idleYaw += dt * 0.35 * spd;
-      else if (idle && s.idle === 'sway') { idleT += dt * spd; idleYaw = approach(idleYaw, 0.42 * Math.sin(idleT * 0.55), 4, dt); }
-      else idleYaw = approach(idleYaw, s.idle === 'turntable' && idle ? idleYaw : Math.round(idleYaw / TAU) * TAU, busy ? 2.2 : 3, dt);
-      let yaw = view * DEG + idleYaw;
-      if (evSpin) { evSpin.t += dt; yaw += evSpin.turns * TAU * ease(evSpin.t / evSpin.dur); if (evSpin.t >= evSpin.dur) evSpin = null; }
-      yaw += s.entYaw || 0;
+      const dir = s.spinDir < 0 ? -1 : 1, amt = Math.max(0, s.motionAmt ?? 1);
+      let mYaw = 0, mLift = 0, mRoll = 0, mPitch = 0, mFlip = 0, mSq = 0;
+      for (let i = moments.length - 1; i >= 0; i--) {
+        const m = moments[i], M = MOMENTS[m.kind];
+        m.t += dt; const u = clamp(m.t / M.dur, 0, 1), r = M.f(u, dir);
+        mYaw += r.yaw || 0; mLift += r.lift || 0; mRoll += r.roll || 0; mPitch += r.pitch || 0; mFlip += r.flip || 0;
+        if (u >= 1) moments.splice(i, 1);
+      }
+      // -- the motion picked for this mode: still, slow/fast spin, sway, float, rock, bounce, wobble
+      const mo = s.motion || 'still';
+      const rate = mo === 'spin_slow' ? 0.4 * Math.max(0.05, s.slowSpd ?? 1) : mo === 'spin_fast' ? 2.6 * Math.max(0.05, s.fastSpd ?? 1) : 0;
+      spinRate = approach(spinRate, rate * dir, 2.2, dt);           // spins speed up and slow down smoothly
+      spinYaw += spinRate * dt;
+      if (!rate && Math.abs(spinRate) < 0.2) spinYaw = approach(spinYaw, Math.round(spinYaw / TAU) * TAU, 2.4, dt);   // settle facing front
+      for (const k in env) env[k] = approach(env[k], mo === k ? 1 : 0, 2.4, dt);
+      mYaw += 0.45 * amt * env.sway * Math.sin(T * 0.6);
+      mLift += 0.035 * MH * amt * env.float * (0.5 + 0.5 * Math.sin(T * 1.3));
+      mRoll += 7 * DEG * amt * env.rock * Math.sin(T * 1.05);
+      const bp = Math.abs(Math.sin(T * 2.6));
+      mLift += 0.06 * MH * amt * env.bounce * bp;
+      mSq += 0.07 * amt * env.bounce * Math.max(0, 1 - bp * 5);
+      mPitch += 4.5 * DEG * amt * env.wobble * Math.sin(T * 1.8); mRoll += 4.5 * DEG * amt * env.wobble * Math.cos(T * 1.8);
+      if (s.drift) { mYaw += 2.2 * DEG * Math.sin(T * 0.23) + 1.2 * DEG * Math.sin(T * 0.57); mPitch += 1.2 * DEG * Math.sin(T * 0.31 + 1); }
+      if (s.hitShake && ph === 'active' && s.inhaling) mRoll += 0.9 * DEG * s.ramp * Math.sin(T * 38);
+      const yaw = view * DEG + spinYaw + mYaw + (s.entYaw || 0);
       // -- tip toward the camera on each inhale; lean into swoops; entrance tilt
-      const tiltT = s.tiltHit && ph === 'active' && s.inhaling ? 6.5 * DEG * s.ramp : 0;
-      tiltG.rotation.x = tiltS.step(tiltT, dt) + (s.entTilt || 0);
-      tiltG.rotation.z = leanS.step(-(s.lean || 0) * DEG, dt);
+      const tiltT = s.tiltHit && ph === 'active' && s.inhaling ? 6.5 * DEG * Math.max(0, s.tiltAmt ?? 1) * s.ramp : 0;
+      tiltG.rotation.x = tiltS.step(tiltT, dt) + (s.entTilt || 0) + mPitch;
+      tiltG.rotation.z = leanS.step(-(s.lean || 0) * DEG, dt) + mRoll;
+      flipG.rotation.x = mFlip;
       spinG.rotation.y = yaw;
       // -- the camera eases in while it heats and stays in for the session
       const pushT = s.pushIn ? (ph === 'heating' ? 1 + 0.07 * s.prog : ph === 'active' ? 1.07 : 1) : 1;
@@ -345,26 +393,37 @@ export async function createRig3D(canvas, url, opts = {}) {
       ledMat.color.copy(CHARGE).multiplyScalar(full ? 1 : 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(T * 3)));
       spillMat.opacity = clamp(pa, 0, 1) * (full ? 0.45 : 0.32 + 0.14 * Math.sin(T * 2.2));
       let lift = PH * clamp(pa, 0, 1.2);
-      if (hop) { hop.t += dt; const u = hop.t / hop.dur; lift += hop.h * Math.sin(Math.PI * clamp(u, 0, 1)); if (u >= 1) hop = null; }
-      const sq = s.squash || 0;
+      lift += mLift;
+      const sq = (s.squash || 0) + mSq;
       rigRoot.position.y = lift;
       rigRoot.scale.set(pushK * (1 + 0.5 * sq), pushK * (1 - sq), pushK * (1 + 0.5 * sq));
       shadow.position.y = (s.onPad ? PH * clamp(pa, 0, 1) : 0) + 0.002 * MH;
       shadowMat.opacity = s.shadow ? 0.6 * clamp(1 - (lift - PH * clamp(pa, 0, 1)) / (0.25 * MH), 0.2, 1) : 0;
-      // -- carb cap twists back and forth in a session
+      // -- carb cap: rocks / twists / spins / lifts during a session (bigger on the inhale)
       if (capPivot) {
-        const amp = ph === 'active' && s.cap ? (s.inhaling ? 42 : 26) * DEG * Math.max(0, s.capAmt) : 0;
-        capPh += dt * (s.inhaling ? 3.6 : 2.4);
-        capAng = approach(capAng, amp * (Math.sin(capPh) + 0.2 * Math.sin(capPh * 2.3 + 1.1)), 7, dt);
-        capPivot.rotation.y = capAng;
+        const on = ph === 'active' && s.cap, k = on ? (s.inhaling ? 1 : 0.65) * Math.max(0, s.capAmt ?? 1) : 0, st = s.capStyle || 'rock_twist';
+        capPh += dt * (s.inhaling ? 4.2 : 3.0);
+        const w = Math.sin(capPh) + 0.18 * Math.sin(capPh * 2.3 + 1.1);
+        const rock = st === 'rock' || st === 'rock_twist', twist = st === 'twist' || st === 'rock_twist' || st === 'lift';
+        capS.rz = approach(capS.rz, rock ? 13 * DEG * k * w : 0, 8, dt);
+        capS.rx = approach(capS.rx, rock ? 5 * DEG * k * Math.cos(capPh * 1.13) : 0, 8, dt);
+        if (st === 'spin' && on) { capSpin += dt * 3.2 * (0.4 + k); capS.ry = capSpin; }
+        else { capSpin = Math.round(capSpin / TAU) * TAU; capS.ry = approach(capS.ry, twist ? 38 * DEG * k * w : 0, 7, dt); }
+        capS.ly = approach(capS.ly, st === 'lift' && on ? 0.028 * MH * k * (0.55 + 0.45 * Math.sin(capPh * 0.5)) : 0, 6, dt);
+        capPivot.rotation.set(capS.rx, capS.ry, capS.rz);
+        capPivot.position.set(capRest.x, capRest.y + capS.ly, capRest.z);
       }
       // -- lights
       accent.setRGB(s.color[0], s.color[1], s.color[2], SRGBColorSpace);
       ringFlash = Math.max(0, ringFlash - dt * 1.4);
       if (ringMat) {
         ringMat.emissive.copy(accent);
-        ringMat.emissiveIntensity = 3.2 * (s.ring + ringFlash * 0.8);
-        ringU.uFill.value = s.fill; ringU.uEdge.value = s.fill < 0.999 ? 1 : 0;
+        const heating = ph === 'heating', rh = s.ringHeat || 'fill';
+        const pulse = heating && rh === 'pulse' ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(T * 5.5)) : 1;
+        ringMat.emissiveIntensity = 3.2 * (s.ring * pulse + ringFlash * 0.8);
+        const fill = heating && rh === 'fill' ? s.fill : 1;
+        ringU.uFill.value = fill; ringU.uEdge.value = fill < 0.999 ? 1 : 0;
+        ringU.uChase.value = heating && rh === 'chase' ? (T * (0.45 + 0.9 * s.prog)) % 1 : -1;
       }
       ringLight.color.copy(accent); ringLight.intensity = 0.35 * (s.ring + ringFlash);
       const useGrad = s.editionLight && gradMap;

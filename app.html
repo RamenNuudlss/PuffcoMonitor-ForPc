@@ -263,7 +263,7 @@ tr:hover td { background: rgba(255,255,255,.025); }
 .f .val { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); background: rgba(255,255,255,.06); border-radius: 7px; padding: 3px 7px; }
 .f label { color: #c9c9d3; font-size: 13.5px; }
 .f.off { opacity: .35; pointer-events: none; }
-.f.hide.off, .group.hide.off { display: none; }
+.f.hide.off, .group.hide.off, .group.empty { display: none; }
 .f.note { display: block; color: var(--dim); font-size: 12.5px; line-height: 1.55; padding: 4px 0 12px; border-top: 0;
   background: none; }
 .f.note::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 8px 1px 0;
@@ -923,7 +923,14 @@ function condOk(store, when) {
   const list = Array.isArray(when[0]) ? when : [when];
   return list.every(([k, v]) => (Array.isArray(v) ? v : [v]).includes(S[store][k]));
 }
-function refreshConds() { condEls.forEach(([el, store, when]) => el.classList.toggle('off', !condOk(store, when))); }
+function refreshConds() {
+  condEls.forEach(([el, store, when]) => el.classList.toggle('off', !condOk(store, when)));
+  // a card whose rows are all hidden for this style disappears too
+  document.querySelectorAll('.card.group').forEach(g => {
+    const rows = [...g.children].filter(c => c.tagName !== 'H4');
+    g.classList.toggle('empty', rows.length > 0 && rows.every(c => c.classList.contains('hide') && c.classList.contains('off')));
+  });
+}
 const ACTIONS = {
   clear_charges: () => confirmAct('Clear charge history?', 'Every logged charge is deleted. This also resets the average charge time and the full-in estimate.', 'clear_charges', 'Clear'),
   clear_sessions: () => confirmAct('Clear session history?', 'Every logged session is deleted.', 'clear_sessions', 'Clear'),

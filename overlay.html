@@ -128,8 +128,11 @@ const PHASE = {
 
 // every setting and its default (the app sends its own values; the URL can override any of them)
 const DEF = {
-  style: 'photo', q3d: 'high', view3d: 'front', tilt3d: 8, idle3d: 'turntable', idle_speed: 1, model3d: 'peak_pro_hd.glb',
-  spin_heat: true, push_in: true, tilt_hit: true, spin_full: true, hop_connect: true,
+  style: 'photo', q3d: 'high', view3d: 'front', tilt3d: 8, model3d: 'peak_pro_hd.glb',
+  m_standby: 'spin_slow', m_charging: 'spin_slow', m_heating: 'still', m_active: 'still', m_cooldown: 'sway', m_off: 'still',
+  spin_slow_speed: 1, spin_fast_speed: 1, spin_dir: 1, motion_amt: 1,
+  ev_heat: 'spin', ev_ready: 'hop', ev_full: 'spin2', ev_connect: 'hop',
+  cap_style: 'rock_twist', tilt_hit: true, tilt_amt: 1, hit_shake: false, ring_heat: 'fill', push_in: true, drift: false,
   edition: '', rig_scale: 1, offline_mode: 'dim', reflection: true, shadow: true, pad: true,
   knob_anim: true, knob_amount: 1, bubbles: true,
   smoke: 'session', inhale: 10, exhale: 4, wait: 1, first_delay: 0.5,
@@ -707,7 +710,7 @@ let popP = null, popV = 0, landArmed = true, landT = null;                  // e
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(MAXDT, (now - last) / 1000); last = now;
-  if (!L) return;
+  if (!L || !rig) return;
   const T = now / 1000, ph = st.phase, since = (now - phaseSince) / 1000;
   const smokeMode = S('smoke'), is3d = rig === RIG3D;
   // ---- session rhythm: smoke (inhale), pause (exhale), wait, repeat - all adjustable ----
@@ -894,9 +897,11 @@ function frame(now) {
         ring: Math.min(1.6, base * LI), glass, heat, fill: ph === 'heating' && S('heat_fill') ? prog : 1,
         color: col, editionLight: String(S('light') || 'edition') === 'edition',
         onPad, full: !!(st.charge_full || (st.battery || 0) >= 99.5), battery: st.battery,
-        idle: String(S('idle3d')), idleSpeed: N('idle_speed'), spinHeat: S('spin_heat'), pushIn: S('push_in'),
-        tiltHit: S('tilt_hit'), spinFull: S('spin_full'), hopConnect: S('hop_connect'),
-        cap: S('knob_anim'), capAmt: N('knob_amount'), bubbles: S('bubbles'), shadow: S('shadow'), reflection: S('reflection'),
+        motion: String(S('m_' + (ph === 'standby' && charging ? 'charging' : ph === 'active' ? 'active' : ph))),
+        slowSpd: N('spin_slow_speed'), fastSpd: N('spin_fast_speed'), spinDir: N('spin_dir'), motionAmt: N('motion_amt'),
+        evHeat: String(S('ev_heat')), evReady: String(S('ev_ready')), evFull: String(S('ev_full')), evConnect: String(S('ev_connect')),
+        pushIn: S('push_in'), drift: S('drift'), tiltHit: S('tilt_hit'), tiltAmt: N('tilt_amt'), hitShake: S('hit_shake'),
+        ringHeat: String(S('ring_heat')), cap: S('knob_anim'), capAmt: N('knob_amount'), capStyle: String(S('cap_style')), bubbles: S('bubbles'), shadow: S('shadow'), reflection: S('reflection'),
         entYaw, entTilt, squash, lean: lean3d,
       }, S('reflection') && !onPad ? $('refl3d') : null);
     }

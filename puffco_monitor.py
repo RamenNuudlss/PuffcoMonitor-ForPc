@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-VERSION = "2.2"
+VERSION = "2.3"
 FROZEN = getattr(sys, "frozen", False)
 RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))          # files bundled with the app
 HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent   # your data
@@ -479,8 +479,12 @@ RIGS_DIR = HERE / "rigs"
 MODELS_DIR = HERE / "models"          # 3D model(s) for the overlay's 3D style
 OVERLAY_DEFAULTS = {
     # rig
-    "style": "photo", "q3d": "high", "view3d": "front", "tilt3d": 8, "idle3d": "turntable", "idle_speed": 1.0,
-    "model3d": "peak_pro_hd.glb", "spin_heat": True, "push_in": True, "tilt_hit": True, "spin_full": True, "hop_connect": True,
+    "style": "photo", "q3d": "high", "view3d": "front", "tilt3d": 8, "model3d": "peak_pro_hd.glb",
+    "m_standby": "spin_slow", "m_charging": "spin_slow", "m_heating": "still", "m_active": "still", "m_cooldown": "sway", "m_off": "still",
+    "spin_slow_speed": 1.0, "spin_fast_speed": 1.0, "spin_dir": 1, "motion_amt": 1.0,
+    "ev_heat": "spin", "ev_ready": "hop", "ev_full": "spin2", "ev_connect": "hop",
+    "cap_style": "rock_twist", "tilt_hit": True, "tilt_amt": 1.0, "hit_shake": False, "ring_heat": "fill",
+    "push_in": True, "drift": False,
     "edition": "", "rig_scale": 1.0, "offline_mode": "dim", "reflection": True, "shadow": True, "pad": True,
     "knob_anim": True, "knob_amount": 1.0, "bubbles": True,
     # vapor
@@ -506,6 +510,10 @@ LIGHT_PRESETS = {"Match edition": "edition", "Pink": "#ff5ca8", "Purple": "#9b7b
 SMOKE_MODES = {"Rhythm: smoke, pause, wait, repeat": "session", "Nonstop cloud": "constant", "No vapor": "off"}
 RHYTHM = ("smoke", "session")
 STYLE_3D, STYLE_PHOTO = ("style", "3d"), ("style", "photo")
+MOTIONS_3D = {"Stays still": "still", "Slow spin": "spin_slow", "Fast spin": "spin_fast", "Sways side to side": "sway",
+              "Floats up and down": "float", "Rocks side to side": "rock", "Bounces": "bounce", "Wobbles like a top": "wobble"}
+MOMENTS_3D = {"Nothing": "none", "Spins once": "spin", "Spins twice": "spin2", "Hops": "hop", "Hops and spins": "hopspin",
+              "Does a flip": "flip", "Shakes": "shake", "Nods": "nod"}
 VIEW_ANGLES = {"Front": "front", "Three-quarter": "three_quarter", "Side (glass on the left)": "side",
                "Three-quarter, other way": "three_quarter_other", "Other side": "side_other", "Back": "back"}
 POPUP = ("visibility", "popup")
@@ -526,16 +534,7 @@ OV_PAGES = [
          "opts": {"High (sharpest, heaviest)": "high", "Balanced": "balanced", "Performance (lightest, simpler glass)": "performance"}},
         {"k": "view3d", "t": "choice", "label": "Angle", "opts": VIEW_ANGLES, "when": STYLE_3D},
         {"k": "tilt3d", "t": "num", "label": "Camera height", "lo": 0, "hi": 35, "fmt": "{}°", "when": STYLE_3D},
-        {"k": "idle3d", "t": "choice", "label": "In standby it", "when": STYLE_3D,
-         "opts": {"Slowly turns around (turntable)": "turntable", "Gently sways side to side": "sway", "Stays still": "still"}},
-        {"k": "idle_speed", "t": "pct", "label": "Turning speed", "lo": 25, "hi": 300,
-         "when": (STYLE_3D, ("idle3d", ("turntable", "sway")))},
-        {"t": "head", "label": "3D animations", "when": STYLE_3D},
-        {"k": "spin_heat", "t": "bool", "label": "Spins around once when it starts heating", "when": STYLE_3D},
-        {"k": "push_in", "t": "bool", "label": "Camera eases in while it heats up", "when": STYLE_3D},
-        {"k": "tilt_hit", "t": "bool", "label": "Tips toward the camera on each inhale", "when": STYLE_3D},
-        {"k": "spin_full", "t": "bool", "label": "Victory spin when it's fully charged", "when": STYLE_3D},
-        {"k": "hop_connect", "t": "bool", "label": "Hops when it connects", "when": STYLE_3D},
+        {"t": "note", "text": "Spins, moves and reactions for the 3D model are on the 3D motion tab.", "when": STYLE_3D},
         {"t": "head", "label": "Details"},
         {"k": "reflection", "t": "bool", "label": "Reflection on the floor"},
         {"k": "shadow", "t": "bool", "label": "Drop shadow"},
@@ -543,6 +542,39 @@ OV_PAGES = [
         {"k": "bubbles", "t": "bool", "label": "Bubbles in the glass while it's smoking"},
         {"k": "knob_anim", "t": "bool", "label": "Carb cap moves during a session (rocks on the photo, twists on the 3D model)"},
         {"k": "knob_amount", "t": "pct", "label": "Carb cap movement", "lo": 25, "hi": 250, "when": ("knob_anim", True)},
+    ]),
+    ("3D motion", [
+        {"t": "note", "when": STYLE_PHOTO,
+         "text": "These animations are for the 3D model. Set Rig, then Style, to the 3D model to use them."},
+        {"t": "head", "label": "How it moves in each mode", "when": STYLE_3D},
+        {"k": "m_standby", "t": "choice", "label": "Standby", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"k": "m_charging", "t": "choice", "label": "Charging", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"k": "m_heating", "t": "choice", "label": "Heating up", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"k": "m_active", "t": "choice", "label": "Ready / session (boofin)", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"k": "m_cooldown", "t": "choice", "label": "Cooling down", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"k": "m_off", "t": "choice", "label": "Disconnected", "opts": MOTIONS_3D, "when": STYLE_3D},
+        {"t": "head", "label": "Speed and size", "when": STYLE_3D},
+        {"k": "spin_slow_speed", "t": "pct", "label": "Slow spin speed", "lo": 25, "hi": 300, "when": STYLE_3D},
+        {"k": "spin_fast_speed", "t": "pct", "label": "Fast spin speed", "lo": 25, "hi": 300, "when": STYLE_3D},
+        {"k": "spin_dir", "t": "choice", "label": "Spins", "opts": {"To the right": 1, "To the left": -1}, "when": STYLE_3D},
+        {"k": "motion_amt", "t": "pct", "label": "Sway, float, rock, bounce and wobble size", "lo": 25, "hi": 250, "when": STYLE_3D},
+        {"t": "head", "label": "Reactions", "when": STYLE_3D},
+        {"k": "ev_heat", "t": "choice", "label": "When it starts heating", "opts": MOMENTS_3D, "when": STYLE_3D},
+        {"k": "ev_ready", "t": "choice", "label": "When it's ready (boofin)", "opts": MOMENTS_3D, "when": STYLE_3D},
+        {"k": "ev_full", "t": "choice", "label": "When it's fully charged", "opts": MOMENTS_3D, "when": STYLE_3D},
+        {"k": "ev_connect", "t": "choice", "label": "When it connects", "opts": MOMENTS_3D, "when": STYLE_3D},
+        {"t": "head", "label": "During a session", "when": STYLE_3D},
+        {"k": "cap_style", "t": "choice", "label": "Carb cap", "when": (STYLE_3D, ("knob_anim", True)),
+         "opts": {"Rocks and twists": "rock_twist", "Rocks back and forth": "rock", "Twists back and forth": "twist",
+                  "Spins around": "spin", "Lifts and turns": "lift"}},
+        {"k": "tilt_hit", "t": "bool", "label": "Tips toward the camera on each inhale", "when": STYLE_3D},
+        {"k": "tilt_amt", "t": "pct", "label": "How far it tips", "lo": 25, "hi": 300, "when": (STYLE_3D, ("tilt_hit", True))},
+        {"k": "hit_shake", "t": "bool", "label": "Shakes a little while you're hitting it", "when": STYLE_3D},
+        {"k": "ring_heat", "t": "choice", "label": "Light ring while heating", "when": STYLE_3D,
+         "opts": {"Fills up around the base": "fill", "Races around the base": "chase", "Pulses": "pulse"}},
+        {"t": "head", "label": "Camera", "when": STYLE_3D},
+        {"k": "push_in", "t": "bool", "label": "Eases in while it heats up", "when": STYLE_3D},
+        {"k": "drift", "t": "bool", "label": "Drifts gently, like it's handheld", "when": STYLE_3D},
     ]),
     ("Vapor", [
         {"k": "smoke", "t": "choice", "label": "Vapor", "opts": SMOKE_MODES},
